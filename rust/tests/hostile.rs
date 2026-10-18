@@ -52,16 +52,7 @@ fn good(f: &Frame) -> Vec<u8> {
 }
 
 fn send_ok(s: &mut UnixStream, f: &Frame, meta: Vec<u8>) {
-  let _ = frame::write(
-    s,
-    &Frame {
-      flags: FLAG_RESPONSE,
-      method: f.method,
-      request_id: f.request_id,
-      meta,
-      payload: vec![],
-    },
-  );
+  let _ = frame::write(s, &Frame::new(FLAG_RESPONSE, f.method, f.request_id, meta, vec![]));
 }
 
 fn start(act: Act) -> Server {
@@ -118,11 +109,9 @@ fn serve(s: &mut UnixStream, hostile: bool, act: Act) {
 fn logged() -> (Options, Arc<Mutex<Vec<String>>>) {
   let lines = Arc::new(Mutex::new(Vec::new()));
   let l = lines.clone();
-  let opts = Options {
-    pool_size: 1,
-    logger: Some(Arc::new(move |m: &str| l.lock().unwrap().push(m.to_string()))),
-    ..Options::default()
-  };
+  let opts = Options::default()
+    .with_pool_size(1)
+    .with_logger(Arc::new(move |m: &str| l.lock().unwrap().push(m.to_string())));
   (opts, lines)
 }
 
@@ -414,8 +403,7 @@ fn cases() -> Vec<Case> {
       open_then_close,
       |c| {
         let f = c.open("/a", open_flag::READ_ONLY, 0)?;
-        f.read_batch(&[Range { offset: 0, length: 10 }, Range { offset: 10, length: 10 }])
-          .map(|_| ())
+        f.read_batch(&[Range::new(0, 10), Range::new(10, 10)]).map(|_| ())
       },
       NO_LIMIT,
       Want::Io,

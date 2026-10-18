@@ -84,13 +84,7 @@ fn start(cfg: impl FnOnce(&mut Shared)) -> Server {
 }
 
 fn reply(req: &Frame, meta: Vec<u8>) -> Frame {
-  Frame {
-    flags: FLAG_RESPONSE,
-    method: req.method,
-    request_id: req.request_id,
-    meta,
-    payload: vec![],
-  }
+  Frame::new(FLAG_RESPONSE, req.method, req.request_id, meta, vec![])
 }
 
 fn send(w: &Writer, f: &Frame) {
@@ -193,12 +187,10 @@ fn answer(sh: &Shared, w: &Writer, idx: usize, req: Frame) -> usize {
 fn client(srv: &Server, pool: usize, timeout_ms: u64, max_inflight: usize) -> Client {
   Client::connect_with(
     &srv.path,
-    Options {
-      pool_size: pool,
-      call_timeout: Duration::from_millis(timeout_ms),
-      max_inflight,
-      ..Default::default()
-    },
+    Options::default()
+      .with_pool_size(pool)
+      .with_call_timeout(Duration::from_millis(timeout_ms))
+      .with_max_inflight(max_inflight),
   )
   .unwrap()
 }

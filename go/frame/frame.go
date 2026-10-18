@@ -31,6 +31,7 @@ const (
 
 // Frame is one decoded message.
 type Frame struct {
+	_         struct{} // Callers must name fields. New fields can be added.
 	Meta      []byte
 	Payload   []byte
 	RequestID uint64
@@ -41,6 +42,7 @@ type Frame struct {
 // Limits bounds frame sizes. A reader rejects frames over these before it
 // allocates. A peer that sends a larger frame gets a protocol error.
 type Limits struct {
+	_               struct{} // Callers must name fields. New fields can be added.
 	MaxMetaBytes    uint32
 	MaxPayloadBytes uint32
 }

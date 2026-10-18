@@ -16,3 +16,10 @@ pub mod open_flag {
   pub const TRUNC: u32 = 512;
   pub const APPEND: u32 = 1024;
 }
+
+impl Range {
+  /// A byte range of `length` bytes from `offset`, for `File::read_batch`.
+  pub fn new(offset: i64, length: u32) -> Range {
+    Range { offset, length }
+  }
+}

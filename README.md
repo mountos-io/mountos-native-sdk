@@ -115,7 +115,7 @@ The socket is private to the mount owner. The mount reads the user id of each co
 
 ## Versioning
 
-The wire contract is in `api/filesystem.yaml`. The public call layer is in `api/client.yaml`. `api/contract-snapshot.json` records the released contract. A new version can add calls and fields. It cannot remove or change an existing one, and the build fails if a change would break an older client.
+The wire contract is in `api/filesystem.yaml`. The public call layer is in `api/client.yaml`. `api/contract-snapshot.json` records the released contract. A new version can add calls and fields. It cannot remove or change an existing one, and the build fails if a change would break an older client. Public structs are built by field name only. New fields can be added in a minor version.
 
 ## Development
 

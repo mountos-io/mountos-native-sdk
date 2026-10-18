@@ -238,7 +238,7 @@ func hostileCases() []hostileCase {
 			}},
 		{name: "close in StatBatch", call: func(cl *Client) error { _, err := cl.StatBatch([]string{"/a", "/b"}); return err },
 			wantErr: isConnLost,
-			act: func(c net.Conn, f frame.Frame) bool { c.Close(); return false }},
+			act:     func(c net.Conn, f frame.Frame) bool { c.Close(); return false }},
 		{name: "close in ReadFile body", call: func(cl *Client) error { _, err := cl.ReadFile("/a"); return err },
 			wantErr: isConnLost,
 			act: func(c net.Conn, f frame.Frame) bool {
@@ -253,7 +253,7 @@ func hostileCases() []hostileCase {
 				if err != nil {
 					return err
 				}
-				_, err = f.ReadBatch([]Range{{0, 10}, {10, 10}})
+				_, err = f.ReadBatch([]Range{{Offset: 0, Length: 10}, {Offset: 10, Length: 10}})
 				return err
 			},
 			act: func(c net.Conn, f frame.Frame) bool {

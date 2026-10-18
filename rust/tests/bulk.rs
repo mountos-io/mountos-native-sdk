@@ -85,13 +85,7 @@ impl WithPayload for Frame {
 }
 
 fn resp(req: &Frame, meta: Vec<u8>, extra: u8) -> Frame {
-  Frame {
-    flags: FLAG_RESPONSE | extra,
-    method: req.method,
-    request_id: req.request_id,
-    meta,
-    payload: vec![],
-  }
+  Frame::new(FLAG_RESPONSE | extra, req.method, req.request_id, meta, vec![])
 }
 
 fn error_frame(req: &Frame, code: &str, message: &str) -> Frame {
@@ -302,14 +296,7 @@ fn write_at(data: &mut Vec<u8>, off: usize, buf: &[u8]) {
 }
 
 fn client(srv: &Server, pool: usize) -> Client {
-  Client::connect_with(
-    &srv.path,
-    Options {
-      pool_size: pool,
-      ..Options::default()
-    },
-  )
-  .unwrap()
+  Client::connect_with(&srv.path, Options::default().with_pool_size(pool)).unwrap()
 }
 
 fn pattern(n: usize) -> Vec<u8> {
@@ -369,26 +356,17 @@ fn batch_round_trip_with_hole() {
   let c = client(&srv, 1);
   let f = c.open("/b", open_flag::READ_WRITE | open_flag::CREATE, 0o644).unwrap();
   let w = f
-    .write_batch(&[
-      WriteItem {
-        offset: 0,
-        data: b"abc".to_vec(),
-      },
-      WriteItem {
-        offset: 10,
-        data: b"xyz".to_vec(),
-      },
-    ])
+    .write_batch(&[WriteItem::new(0, b"abc".to_vec()), WriteItem::new(10, b"xyz".to_vec())])
     .unwrap();
   assert_eq!(w.iter().map(|x| *x.as_ref().unwrap()).collect::<Vec<_>>(), vec![3, 3]);
   let r = f
     .read_batch(&[
-      Range { offset: 0, length: 3 },
-      Range { offset: 3, length: 7 },
-      Range { offset: 10, length: 3 },
-      Range { offset: 11, length: 10 },
-      Range { offset: 100, length: 4 },
-      Range { offset: -1, length: 4 },
+      Range::new(0, 3),
+      Range::new(3, 7),
+      Range::new(10, 3),
+      Range::new(11, 10),
+      Range::new(100, 4),
+      Range::new(-1, 4),
     ])
     .unwrap();
   assert_eq!(r[0].as_ref().unwrap(), b"abc");
@@ -407,18 +385,9 @@ fn write_batch_reports_failed_item() {
   let f = c.open("/w", open_flag::READ_WRITE | open_flag::CREATE, 0o644).unwrap();
   let w = f
     .write_batch(&[
-      WriteItem {
-        offset: 0,
-        data: b"aa".to_vec(),
-      },
-      WriteItem {
-        offset: u64::MAX,
-        data: b"bb".to_vec(),
-      },
-      WriteItem {
-        offset: 2,
-        data: b"cc".to_vec(),
-      },
+      WriteItem::new(0, b"aa".to_vec()),
+      WriteItem::new(u64::MAX, b"bb".to_vec()),
+      WriteItem::new(2, b"cc".to_vec()),
     ])
     .unwrap();
   assert_eq!(*w[0].as_ref().unwrap(), 2);
@@ -432,12 +401,7 @@ fn batches_split_by_payload_size() {
   let srv = start(100);
   let c = client(&srv, 1);
   let f = c.open("/s", open_flag::READ_WRITE | open_flag::CREATE, 0o644).unwrap();
-  let items: Vec<WriteItem> = (0..10)
-    .map(|i| WriteItem {
-      offset: i * 40,
-      data: vec![i as u8 + 1; 40],
-    })
-    .collect();
+  let items: Vec<WriteItem> = (0..10).map(|i| WriteItem::new(i * 40, vec![i as u8 + 1; 40])).collect();
   let w = f.write_batch(&items).unwrap();
   assert!(w.iter().all(|x| *x.as_ref().unwrap() == 40));
   // 40 byte items under a 100 byte limit: two per request.
@@ -452,12 +416,7 @@ fn batches_split_by_payload_size() {
     .collect();
   assert_eq!(wr, vec![2; 5]);
   srv.shared.batches.lock().unwrap().clear();
-  let ranges: Vec<Range> = (0..10)
-    .map(|i| Range {
-      offset: i * 40,
-      length: 40,
-    })
-    .collect();
+  let ranges: Vec<Range> = (0..10).map(|i| Range::new(i * 40, 40)).collect();
   let r = f.read_batch(&ranges).unwrap();
   for (i, x) in r.iter().enumerate() {
     assert_eq!(x.as_ref().unwrap(), &vec![i as u8 + 1; 40]);
@@ -482,18 +441,9 @@ fn oversize_item_falls_back_to_chunked_io() {
   let big = pattern(250);
   let w = f
     .write_batch(&[
-      WriteItem {
-        offset: 0,
-        data: b"hd".to_vec(),
-      },
-      WriteItem {
-        offset: 2,
-        data: big.clone(),
-      },
-      WriteItem {
-        offset: 300,
-        data: b"tl".to_vec(),
-      },
+      WriteItem::new(0, b"hd".to_vec()),
+      WriteItem::new(2, big.clone()),
+      WriteItem::new(300, b"tl".to_vec()),
     ])
     .unwrap();
   assert_eq!(
@@ -501,11 +451,7 @@ fn oversize_item_falls_back_to_chunked_io() {
     vec![2, 250, 2]
   );
   let r = f
-    .read_batch(&[
-      Range { offset: 0, length: 2 },
-      Range { offset: 2, length: 250 },
-      Range { offset: 300, length: 2 },
-    ])
+    .read_batch(&[Range::new(0, 2), Range::new(2, 250), Range::new(300, 2)])
     .unwrap();
   assert_eq!(r[0].as_ref().unwrap(), b"hd");
   assert_eq!(r[1].as_ref().unwrap(), &big);

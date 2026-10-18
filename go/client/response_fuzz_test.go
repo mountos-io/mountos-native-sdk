@@ -143,7 +143,7 @@ var fuzzOps = []struct {
 	{"Flush", func(_ *Client, f *File, _ *Dir) error { return f.Flush() }},
 	{"FileTruncate", func(_ *Client, f *File, _ *Dir) error { return f.Truncate(5) }},
 	{"ReadBatch", func(_ *Client, f *File, _ *Dir) error {
-		rs, err := f.ReadBatch([]Range{{0, 8}, {8, 8}, {100, 8}})
+		rs, err := f.ReadBatch([]Range{{Offset: 0, Length: 8}, {Offset: 8, Length: 8}, {Offset: 100, Length: 8}})
 		if err == nil {
 			if len(rs) != 3 {
 				return errors.New("fuzz oracle: ReadBatch result count")

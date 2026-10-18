@@ -9,5 +9,10 @@ fn main() {
   let dir = proto.parent().expect("proto dir").to_path_buf();
   println!("cargo:rerun-if-changed={}", proto.display());
   println!("cargo:rerun-if-env-changed=PROTOC");
-  prost_build::compile_protos(&[proto], &[dir]).expect("prost-build failed (protoc must be on PATH or set via PROTOC)");
+  let mut cfg = prost_build::Config::new();
+  // Range is built by callers. Other wire messages are read by callers or built by the crate.
+  cfg.type_attribute(".mountos.filesystem.v1.Range", "#[non_exhaustive]");
+  cfg
+    .compile_protos(&[proto], &[dir])
+    .expect("prost-build failed (protoc must be on PATH or set via PROTOC)");
 }

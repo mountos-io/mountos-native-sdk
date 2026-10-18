@@ -58,13 +58,13 @@ impl Rng {
 }
 
 fn random_frame(r: &mut Rng) -> Frame {
-  Frame {
-    flags: r.below(16) as u8,
-    method: r.below(65536) as u16,
-    request_id: r.next(),
-    meta: r.some(0, 64),
-    payload: r.some(0, 256),
-  }
+  Frame::new(
+    r.below(16) as u8,
+    r.below(65536) as u16,
+    r.next(),
+    r.some(0, 64),
+    r.some(0, 256),
+  )
 }
 
 fn wire(f: &Frame) -> Vec<u8> {
@@ -215,13 +215,7 @@ fn write_then_read_returns_the_same_frames() {
 
 #[test]
 fn every_prefix_of_a_frame_ends_with_a_typed_result() {
-  let f = Frame {
-    flags: 1,
-    method: 3,
-    request_id: 5,
-    meta: b"abc".to_vec(),
-    payload: b"defgh".to_vec(),
-  };
+  let f = Frame::new(1, 3, 5, b"abc".to_vec(), b"defgh".to_vec());
   let full = wire(&f);
   for n in 0..full.len() {
     let (frames, err) = drain(&mut Cursor::new(&full[..n]));
@@ -255,10 +249,7 @@ fn a_claim_at_the_limit_then_eof_allocates_one_step() {
 #[test]
 fn oversize_sections_are_refused_before_any_byte_is_written() {
   let mut sink = Vec::new();
-  let f = Frame {
-    payload: vec![0; MAX_PAYLOAD_BYTES as usize + 1],
-    ..Frame::default()
-  };
+  let f = Frame::new(0, 0, 0, vec![], vec![0; MAX_PAYLOAD_BYTES as usize + 1]);
   assert!(matches!(frame::write(&mut sink, &f), Err(Error::TooLarge(_))));
   assert!(sink.is_empty());
 }

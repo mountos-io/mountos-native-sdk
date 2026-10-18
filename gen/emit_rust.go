@@ -223,7 +223,7 @@ func rustNeedsError(s *Spec, st Stub) bool {
 }
 
 func writeRustResult(b *bytes.Buffer, s *Spec, st Stub) {
-	fmt.Fprintf(b, "/// Result of `%s`.\n#[derive(Clone, Debug, Default, PartialEq)]\npub struct %s {\n", snakeCase(st.Name), st.Result)
+	fmt.Fprintf(b, "/// Result of `%s`.\n#[derive(Clone, Debug, Default, PartialEq)]\n#[non_exhaustive]\npub struct %s {\n", snakeCase(st.Name), st.Result)
 	for _, r := range st.Returns {
 		fmt.Fprintf(b, "pub %s: %s,\n", rustIdent(r.Name), rustFieldType(s, r.Type))
 	}

@@ -66,13 +66,7 @@ fn send(out: &Mutex<UnixStream>, f: &Frame) {
 }
 
 fn reply(req: &Frame, meta: Vec<u8>) -> Frame {
-  Frame {
-    flags: FLAG_RESPONSE,
-    method: req.method,
-    request_id: req.request_id,
-    meta,
-    payload: vec![],
-  }
+  Frame::new(FLAG_RESPONSE, req.method, req.request_id, meta, vec![])
 }
 
 fn error_reply(req: &Frame, code: &str, message: &str) -> Frame {
@@ -199,13 +193,7 @@ fn change(watch: u64, kind: WatchEventKind, path: &str, old: &str, seq: u64) -> 
 }
 
 fn nframe(n: Notice) -> Frame {
-  Frame {
-    flags: FLAG_NOTIFY,
-    method: method::NOTICE,
-    request_id: n.ref_id,
-    meta: n.encode_to_vec(),
-    payload: vec![],
-  }
+  Frame::new(FLAG_NOTIFY, method::NOTICE, n.ref_id, n.encode_to_vec(), vec![])
 }
 
 fn wait_for(what: &str, f: impl Fn() -> bool) {
@@ -225,11 +213,9 @@ fn client_with(srv: &Server, pool: usize) -> (Client, Log) {
   let l = log.clone();
   let c = Client::connect_with(
     &srv.path,
-    Options {
-      pool_size: pool,
-      logger: Some(Arc::new(move |line: &str| l.lock().unwrap().push(line.to_string()))),
-      ..Options::default()
-    },
+    Options::default()
+      .with_pool_size(pool)
+      .with_logger(Arc::new(move |line: &str| l.lock().unwrap().push(line.to_string()))),
   )
   .unwrap();
   (c, log)

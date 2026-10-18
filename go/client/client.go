@@ -24,6 +24,7 @@ const DefaultMaxInflight = 32
 
 // Options configures a Client.
 type Options struct {
+	_ struct{} // Callers must name fields. New fields can be added.
 	// Logger receives diagnostic lines: events that no listener took, dropped
 	// events, and listener panics. Pass your own, for example a *log.Logger.
 	// When nil, lines go to os.Stderr with the prefix "mountos: ".

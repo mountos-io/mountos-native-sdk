@@ -1,7 +1,8 @@
 use std::{fmt, io};
 
-/// Errors returned by the client.
+/// Errors returned by the client. New variants can be added, so a `match` needs a wildcard arm.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
   /// The server answered with an error frame. `code` is a POSIX name such as ENOENT.
   Server { code: String, message: String },

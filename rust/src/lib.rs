@@ -15,6 +15,9 @@
 // Library code reports failures as errors. Tests may unwrap.
 #![deny(clippy::dbg_macro, clippy::todo, clippy::unimplemented)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
+// A public type that outside code builds or matches carries #[non_exhaustive], so a new field or
+// variant is not a breaking change.
+#![warn(clippy::exhaustive_structs, clippy::exhaustive_enums)]
 
 mod bulk;
 mod client;
@@ -27,6 +30,9 @@ mod ops_gen;
 mod socket;
 mod walk;
 mod watch;
+// Protobuf messages and enums stay exhaustive. Only the crate and fake servers build them, and the
+// proto only gains fields. Range is built by callers, so build.rs marks it non_exhaustive.
+#[allow(clippy::exhaustive_structs, clippy::exhaustive_enums)]
 pub mod wire;
 
 pub use bulk::StatResult;

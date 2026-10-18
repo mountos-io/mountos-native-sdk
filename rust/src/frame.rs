@@ -19,13 +19,29 @@ pub const FLAG_NOTIFY: u8 = 8;
 pub const MAX_META_BYTES: u32 = 16 << 20;
 pub const MAX_PAYLOAD_BYTES: u32 = 8 << 20;
 
+/// One decoded message. Build it with `Frame::new`. New fields can be
+/// added in a minor version.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Frame {
   pub flags: u8,
   pub method: u16,
   pub request_id: u64,
   pub meta: Vec<u8>,
   pub payload: Vec<u8>,
+}
+
+impl Frame {
+  /// Builds a frame from its five parts.
+  pub fn new(flags: u8, method: u16, request_id: u64, meta: Vec<u8>, payload: Vec<u8>) -> Frame {
+    Frame {
+      flags,
+      method,
+      request_id,
+      meta,
+      payload,
+    }
+  }
 }
 
 /// Rejects sections over the limits. Callers run this before they send a byte, so an oversize

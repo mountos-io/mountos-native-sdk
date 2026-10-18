@@ -160,6 +160,7 @@ func (cl *Client) Truncate(path string, size int64) error {
 
 // StatfsInfo is the result of Statfs.
 type StatfsInfo struct {
+	_           struct{} // Callers must name fields. New fields can be added.
 	BlockSize   uint32
 	Blocks      uint64
 	BlocksFree  uint64

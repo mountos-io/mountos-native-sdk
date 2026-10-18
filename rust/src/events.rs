@@ -24,8 +24,9 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
   m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Kind of an event.
+/// Kind of an event. New kinds can be added, so a `match` needs a wildcard arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EventKind {
   /// A warm request finished. `ref_id` is the warm id.
   WarmDone,
@@ -43,8 +44,9 @@ pub enum EventKind {
   ConnectionLost,
 }
 
-/// How a watched path changed.
+/// How a watched path changed. New kinds can be added, so a `match` needs a wildcard arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ChangeKind {
   Create,
   Remove,
@@ -54,8 +56,10 @@ pub enum ChangeKind {
   Attrib,
 }
 
-/// One event from the server, or a local one (`Overflow`, `ConnectionLost`).
+/// One event from the server, or a local one (`Overflow`, `ConnectionLost`). The client builds
+/// it. Callers only read the fields.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Event {
   pub kind: EventKind,
   /// Server sequence number. 0 for local events.

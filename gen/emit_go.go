@@ -79,7 +79,7 @@ func writeGoResult(b *bytes.Buffer, s *Spec, st Stub) {
 	if st.Result == "" {
 		return
 	}
-	fmt.Fprintf(b, "// %s is the result of %s.\ntype %s struct {\n", st.Result, st.Name, st.Result)
+	fmt.Fprintf(b, "// %s is the result of %s.\ntype %s struct {\n\t_ struct{} // Callers must name fields. New fields can be added.\n", st.Result, st.Name, st.Result)
 	for _, r := range st.Returns {
 		fmt.Fprintf(b, "\t%s %s\n", upperCamel(r.Name), goType(s, r.Type))
 	}

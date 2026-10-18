@@ -66,17 +66,17 @@ fn start(max_payload: u32) -> Server {
 }
 
 fn err(req: &Frame, code: &str) -> Frame {
-  Frame {
-    flags: FLAG_RESPONSE | FLAG_ERROR,
-    method: req.method,
-    request_id: req.request_id,
-    meta: WireError {
+  Frame::new(
+    FLAG_RESPONSE | FLAG_ERROR,
+    req.method,
+    req.request_id,
+    WireError {
       code: code.into(),
       message: "x".into(),
     }
     .encode_to_vec(),
-    payload: vec![],
-  }
+    vec![],
+  )
 }
 
 fn serve(mut s: UnixStream, sh: Arc<Shared>, idx: usize, max_payload: u32) {
@@ -194,13 +194,7 @@ fn serve(mut s: UnixStream, sh: Arc<Shared>, idx: usize, max_payload: u32) {
     };
     sh.inflight.fetch_sub(1, SeqCst);
     let f = match out {
-      Ok(meta) => Frame {
-        flags: FLAG_RESPONSE,
-        method: req.method,
-        request_id: req.request_id,
-        meta,
-        payload,
-      },
+      Ok(meta) => Frame::new(FLAG_RESPONSE, req.method, req.request_id, meta, payload),
       Err(code) => err(&req, code),
     };
     if frame::write(&mut s, &f).is_err() {
@@ -212,11 +206,7 @@ fn serve(mut s: UnixStream, sh: Arc<Shared>, idx: usize, max_payload: u32) {
 fn client(srv: &Server, pool: usize, call_timeout: Duration) -> Client {
   Client::connect_with(
     &srv.path,
-    Options {
-      pool_size: pool,
-      call_timeout,
-      ..Default::default()
-    },
+    Options::default().with_pool_size(pool).with_call_timeout(call_timeout),
   )
   .unwrap()
 }
@@ -351,16 +341,7 @@ fn write_batch_big_item_failure_reports_bytes_written() {
   let c = client(&srv, 1, Duration::ZERO);
   let f = c.open("/w", open_flag::READ_WRITE, 0).unwrap();
   let r = f
-    .write_batch(&[
-      WriteItem {
-        offset: 0,
-        data: vec![1; 3500],
-      },
-      WriteItem {
-        offset: 0,
-        data: vec![1; 10],
-      },
-    ])
+    .write_batch(&[WriteItem::new(0, vec![1; 3500]), WriteItem::new(0, vec![1; 10])])
     .unwrap();
   match &r[0] {
     Err(Error::Partial { written, source }) => {

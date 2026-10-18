@@ -63,11 +63,19 @@ enum Step<T> {
   Big,
 }
 
-/// One write in `File::write_batch`.
+/// One write in `File::write_batch`. Build it with `WriteItem::new`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WriteItem {
   pub offset: u64,
   pub data: Vec<u8>,
+}
+
+impl WriteItem {
+  /// Writes `data` at `offset`.
+  pub fn new(offset: u64, data: Vec<u8>) -> WriteItem {
+    WriteItem { offset, data }
+  }
 }
 
 /// Reads the leading ranges of `ranges` that fit in one ReadBatch request.

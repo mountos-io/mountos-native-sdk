@@ -96,7 +96,7 @@ func TestBatchRoundTripWithHole(t *testing.T) {
 	if err != nil || len(wr) != 2 || wr[0].N != 4 || wr[1].N != 4 || wr[0].Err != nil || wr[1].Err != nil {
 		t.Fatalf("write = %+v, %v", wr, err)
 	}
-	rr, err := f.ReadBatch([]Range{{0, 4}, {4, 4}, {100, 4}, {102, 50}, {500, 8}})
+	rr, err := f.ReadBatch([]Range{{Offset: 0, Length: 4}, {Offset: 4, Length: 4}, {Offset: 100, Length: 4}, {Offset: 102, Length: 50}, {Offset: 500, Length: 8}})
 	if err != nil || len(rr) != 5 {
 		t.Fatalf("read = %+v, %v", rr, err)
 	}
@@ -131,7 +131,7 @@ func TestBatchItemErrors(t *testing.T) {
 	if !errors.As(wr[1].Err, &we) || we.Code != "EIO" || wr[0].Err != nil || wr[2].Err != nil {
 		t.Fatalf("write errors = %+v", wr)
 	}
-	rr, err := f.ReadBatch([]Range{{0, 4}, {badOffset, 2}, {1, 2}})
+	rr, err := f.ReadBatch([]Range{{Offset: 0, Length: 4}, {Offset: badOffset, Length: 2}, {Offset: 1, Length: 2}})
 	if err != nil || string(rr[0].Data) != "data" || string(rr[2].Data) != "at" || len(rr[1].Data) != 0 {
 		t.Fatalf("read = %+v, %v", rr, err)
 	}
@@ -173,7 +173,7 @@ func TestBatchSplitsByPayload(t *testing.T) {
 	if len(s.writeSizes) < 3 {
 		t.Fatalf("expected several write requests, got %v", s.writeSizes)
 	}
-	rr, err := f.ReadBatch([]Range{{0, 400}, {2000, 2500}, {400, 400}})
+	rr, err := f.ReadBatch([]Range{{Offset: 0, Length: 400}, {Offset: 2000, Length: 2500}, {Offset: 400, Length: 400}})
 	if err != nil {
 		t.Fatal(err)
 	}

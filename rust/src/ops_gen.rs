@@ -53,6 +53,7 @@ pub mod method {
 
 /// Result of `statfs`.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct StatfsInfo {
   pub block_size: u32,
   pub blocks: u64,

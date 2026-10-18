@@ -87,13 +87,7 @@ fn serve(mut s: UnixStream, sh: Arc<Shared>, max_payload: u32) {
         vec![],
       ),
     };
-    let f = Frame {
-      flags,
-      method: req.method,
-      request_id: req.request_id,
-      meta,
-      payload,
-    };
+    let f = Frame::new(flags, req.method, req.request_id, meta, payload);
     if frame::write(&mut s, &f).is_err() {
       return;
     }
@@ -350,14 +344,7 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
 }
 
 fn client(srv: &Server, pool: usize) -> Client {
-  Client::connect_with(
-    &srv.path,
-    Options {
-      pool_size: pool,
-      ..Default::default()
-    },
-  )
-  .unwrap()
+  Client::connect_with(&srv.path, Options::default().with_pool_size(pool)).unwrap()
 }
 
 const RW_CREATE: u32 = open_flag::READ_WRITE | open_flag::CREATE;
@@ -699,19 +686,19 @@ fn unsolicited_reply_closes_idle_connection() {
     let (mut s, _) = listener.accept().unwrap();
     s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let req = frame::read(&mut s).unwrap().unwrap();
-    let reply = Frame {
-      flags: FLAG_RESPONSE,
-      method: req.method,
-      request_id: req.request_id,
-      meta: HelloResponse {
+    let reply = Frame::new(
+      FLAG_RESPONSE,
+      req.method,
+      req.request_id,
+      HelloResponse {
         version: 1,
         max_payload_bytes: 1024,
         max_inflight: 1,
         ..Default::default()
       }
       .encode_to_vec(),
-      ..Default::default()
-    };
+      vec![],
+    );
     frame::write(&mut s, &reply).unwrap();
     ready_tx.send(()).unwrap();
     send_rx.recv().unwrap();
@@ -744,13 +731,13 @@ fn mismatched_handshake_reply_is_rejected() {
       let req = frame::read(&mut s).unwrap().unwrap();
       frame::write(
         &mut s,
-        &Frame {
-          flags: FLAG_RESPONSE,
-          method: if wrong_method { method::WATCH } else { req.method },
-          request_id: req.request_id + u64::from(!wrong_method),
-          meta: WatchResponse { watch_id: 7 }.encode_to_vec(),
-          ..Default::default()
-        },
+        &Frame::new(
+          FLAG_RESPONSE,
+          if wrong_method { method::WATCH } else { req.method },
+          req.request_id + u64::from(!wrong_method),
+          WatchResponse { watch_id: 7 }.encode_to_vec(),
+          vec![],
+        ),
       )
       .unwrap();
       let mut b = [0];

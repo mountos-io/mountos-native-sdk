@@ -194,7 +194,7 @@ func TestReadBatchParallelAcrossConns(t *testing.T) {
 	s.files["/r"] = data
 	cl := dial(t, s, 3)
 	f := openRW(t, cl, "/r")
-	ranges := []Range{{0, 2500}, {2500, 2500}, {5000, 2000}, {100, 10}}
+	ranges := []Range{{Offset: 0, Length: 2500}, {Offset: 2500, Length: 2500}, {Offset: 5000, Length: 2000}, {Offset: 100, Length: 10}}
 	res, err := f.ReadBatch(ranges)
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +221,7 @@ func TestReadBatchStopsAfterShortPart(t *testing.T) {
 	s.files["/short"] = pattern(1200, 9)
 	cl := dial(t, s, 1)
 	f := openRW(t, cl, "/short")
-	res, err := f.ReadBatch([]Range{{0, 3000}})
+	res, err := f.ReadBatch([]Range{{Offset: 0, Length: 3000}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestBatchWithoutInodeStaysSerial(t *testing.T) {
 	s.files["/n"] = pattern(4000, 1)
 	cl := dial(t, s, 3)
 	f := openRW(t, cl, "/n")
-	if _, err := f.ReadBatch([]Range{{0, 4000}}); err != nil {
+	if _, err := f.ReadBatch([]Range{{Offset: 0, Length: 4000}}); err != nil {
 		t.Fatal(err)
 	}
 	if p := s.peak.Load(); p != 1 {
@@ -317,7 +317,7 @@ func TestMissingCapabilityFailsLocally(t *testing.T) {
 		"warm open":  func() error { _, err := cl.WarmOpen("/c"); return err },
 		"warm read":  func() error { _, err := cl.WarmRead("/c", 0, 0); return err },
 		"stat batch": func() error { _, err := cl.StatBatch([]string{"/c"}); return err },
-		"read batch": func() error { _, err := f.ReadBatch([]Range{{0, 1}}); return err },
+		"read batch": func() error { _, err := f.ReadBatch([]Range{{Offset: 0, Length: 1}}); return err },
 		"write batch": func() error {
 			_, err := f.WriteBatch([]WriteItem{{Offset: 0, Data: []byte("y")}})
 			return err

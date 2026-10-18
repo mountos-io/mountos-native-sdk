@@ -95,7 +95,7 @@ func TestReadBatchResultsDoNotAlias(t *testing.T) {
 	if _, err := f.WriteBatch([]WriteItem{{Offset: 0, Data: []byte("aaaabbbbcccc")}}); err != nil {
 		t.Fatal(err)
 	}
-	rr, err := f.ReadBatch([]Range{{0, 4}, {4, 4}, {8, 4}})
+	rr, err := f.ReadBatch([]Range{{Offset: 0, Length: 4}, {Offset: 4, Length: 4}, {Offset: 8, Length: 4}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestReadBatchSplitRangeAssembles(t *testing.T) {
 	if _, err := f.WriteBatch([]WriteItem{{Offset: 0, Data: want}}); err != nil {
 		t.Fatal(err)
 	}
-	rr, err := f.ReadBatch([]Range{{0, 10000}, {0, 10}})
+	rr, err := f.ReadBatch([]Range{{Offset: 0, Length: 10000}, {Offset: 0, Length: 10}})
 	if err != nil || !bytes.Equal(rr[0].Data, want) || string(rr[1].Data) != "0123456789" {
 		t.Fatalf("read = %v", err)
 	}

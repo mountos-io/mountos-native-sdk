@@ -16,8 +16,10 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-/// Client settings.
+/// Client settings. Start from `Options::default()` and chain the `with_` methods. New fields
+/// can be added in a minor version, so a struct literal does not compile outside this crate.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct Options {
   /// Number of connections. Calls on different files can run in parallel up to this number.
   pub pool_size: usize,
@@ -55,6 +57,32 @@ impl Default for Options {
       call_timeout: Duration::ZERO,
       max_inflight: DEFAULT_MAX_INFLIGHT,
     }
+  }
+}
+
+impl Options {
+  /// Sets `pool_size`.
+  pub fn with_pool_size(mut self, pool_size: usize) -> Options {
+    self.pool_size = pool_size;
+    self
+  }
+
+  /// Sets `logger`.
+  pub fn with_logger(mut self, logger: Logger) -> Options {
+    self.logger = Some(logger);
+    self
+  }
+
+  /// Sets `call_timeout`.
+  pub fn with_call_timeout(mut self, call_timeout: Duration) -> Options {
+    self.call_timeout = call_timeout;
+    self
+  }
+
+  /// Sets `max_inflight`.
+  pub fn with_max_inflight(mut self, max_inflight: usize) -> Options {
+    self.max_inflight = max_inflight;
+    self
   }
 }
 

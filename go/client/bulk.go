@@ -16,12 +16,14 @@ const maxBatchItems = 4096
 
 // StatResult is the outcome for one path of StatBatch. Info is nil when Err is set.
 type StatResult struct {
+	_    struct{} // Callers must name fields. New fields can be added.
 	Info *wire.FileInfo
 	Err  error
 }
 
 // Range is a byte range of a file for ReadBatch.
 type Range struct {
+	_      struct{} // Callers must name fields. New fields can be added.
 	Offset int64
 	Length uint32
 }
@@ -29,18 +31,21 @@ type Range struct {
 // ReadResult is the outcome for one Range. Data is shorter than the range
 // length when the range reaches past end of file.
 type ReadResult struct {
+	_    struct{} // Callers must name fields. New fields can be added.
 	Err  error
 	Data []byte
 }
 
 // WriteItem is data to write at Offset for WriteBatch.
 type WriteItem struct {
+	_      struct{} // Callers must name fields. New fields can be added.
 	Data   []byte
 	Offset int64
 }
 
 // WriteResult is the outcome for one WriteItem. N is the number of bytes written.
 type WriteResult struct {
+	_   struct{} // Callers must name fields. New fields can be added.
 	Err error
 	N   int
 }
