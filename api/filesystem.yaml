@@ -1,0 +1,601 @@
+# mountOS native filesystem API. Source of truth for wire types,
+# operation IDs, and error codes. Generated code must not be edited.
+#
+# Rules:
+#   - Operation IDs and field IDs are permanent. Never reuse or renumber.
+#     Removed entries go under `reserved`.
+#   - Field notation per field: `{id: N, type: T, required: bool}`.
+#   - Types: bool, uint32, uint64, int64, bytes, string, enum name,
+#     message name, or `repeated <type>`.
+#   - Kinds:
+#       unary         one request message, one response message.
+#       data_request  request message, then raw payload bytes (not Protobuf).
+#       data_response response message, then raw payload bytes (not Protobuf).
+#       server_stream one request, many response messages until end or cancel.
+#   - Raw payload length is bounded by `maxPayloadBytes`. Its size is
+#     carried in the frame header, not in the message.
+
+# Versioning (backward compatible within a major version):
+#   - Major version changes only for wire breaks. A client of major N
+#     talks to any server of major N.
+#   - Minor additions only: new operations with new IDs, new optional
+#     fields with new field IDs, new enum values, new capabilities.
+#   - Clients ignore unknown fields, unknown enum values, and unknown
+#     operations. Servers ignore unknown optional fields.
+#   - New behavior is gated by a capability. Hello negotiates the
+#     intersection. A required capability the server lacks fails the call
+#     with UNSUPPORTED_OPERATION, not a silent fallback.
+#   - Removing or changing an existing field, type, or meaning needs a
+#     major bump. Removed IDs stay under `reserved` forever.
+
+api: mountos.filesystem
+version: 1
+minorVersion: 5
+
+endpoint:
+  # One socket per mount: <home>/.mountOS/sockets/mountos_api_<hash>.sock, where <hash> is the
+  # first 8 bytes of the SHA-256 of the mount path in hex. A long path falls back to a private
+  # per-user temp directory.
+  socketPath: .mountOS/sockets/mountos_api_<hash>.sock
+  transport: unix_stream
+  frameMagic: "MFS1"
+  maxFrameBytes: 16777216
+  maxPayloadBytes: 8388608
+
+# Handshake gates every connection. Unknown required capabilities fail negotiation.
+capabilities:
+  - bulk_io
+  - ls_stat
+  - remove_all
+  - watch
+  - warm
+
+enums:
+  OpenFlag:
+    values:
+      READ_ONLY: 0
+      WRITE_ONLY: 1
+      READ_WRITE: 2
+      CREATE: 64
+      EXCL: 128
+      TRUNC: 512
+      APPEND: 1024
+  Whence:
+    values:
+      SET: 0
+      CUR: 1
+      END: 2
+  FileType:
+    values:
+      REGULAR: 0
+      DIRECTORY: 1
+      SYMLINK: 2
+  # Kind of an asynchronous notice the server pushes on a connection.
+  NoticeKind:
+    values:
+      WARM_DONE: 0      # A warm request finished.
+      WARM_FAILED: 1    # A warm request failed. code and message say why.
+      CLOSING: 2        # The server is about to close this connection, for example on unmount.
+      OVERFLOW: 3       # Notices were dropped because the client read too slowly.
+      CHANGE: 4         # A watched path changed. change_kind, path, and old_path say how.
+
+  WatchEventKind:
+    values:
+      CREATE: 0
+      REMOVE: 1
+      WRITE: 2
+      RENAME: 3
+      ATTRIB: 4
+      OVERFLOW: 5    # Queue dropped events. Client must re-list the watched path.
+
+messages:
+  HelloRequest:
+    client_name: {id: 1, type: string}
+    min_version: {id: 2, type: uint32, required: true}
+    max_version: {id: 3, type: uint32, required: true}
+    capabilities: {id: 4, type: repeated string}
+
+  HelloResponse:
+    version: {id: 1, type: uint32, required: true}
+    capabilities: {id: 2, type: repeated string}
+    max_payload_bytes: {id: 3, type: uint32, required: true}
+    max_inflight: {id: 4, type: uint32, required: true}
+
+  FileInfo:
+    name: {id: 1, type: string}
+    size: {id: 2, type: int64}
+    mode: {id: 3, type: uint32}
+    type: {id: 4, type: FileType}
+    mtime_ns: {id: 5, type: int64}
+    atime_ns: {id: 6, type: int64}
+    ctime_ns: {id: 7, type: int64}
+    uid: {id: 8, type: uint32}
+    gid: {id: 9, type: uint32}
+    nlink: {id: 10, type: uint32}
+    inode: {id: 11, type: uint64}
+
+  DirEntry:
+    name: {id: 1, type: string, required: true}
+    type: {id: 2, type: FileType, required: true}
+    info: {id: 3, type: FileInfo}    # Present for Ls. Absent for Readdir.
+
+  Range:
+    offset: {id: 1, type: int64, required: true}
+    length: {id: 2, type: uint32, required: true}
+
+  BatchItemError:
+    index: {id: 1, type: uint32, required: true}
+    code: {id: 2, type: string, required: true}
+    message: {id: 3, type: string}
+
+  # Asynchronous notice. ref_id is the id the call returned: the warm id for a
+  # warm, the watch id for a watch. path, code, and message are set where they
+  # apply. sequence increases across every notice the server sends.
+  Notice:
+    kind: {id: 1, type: NoticeKind, required: true}
+    sequence: {id: 2, type: uint64, required: true}
+    ref_id: {id: 3, type: uint64}
+    path: {id: 4, type: string}
+    code: {id: 5, type: string}
+    message: {id: 6, type: string}
+    change_kind: {id: 7, type: WatchEventKind}   # Set for CHANGE.
+    old_path: {id: 8, type: string}              # Set for a rename. path is the new name.
+
+  # Error metadata carried when a frame has the error flag set.
+  WireError:
+    code: {id: 1, type: string, required: true}
+    message: {id: 2, type: string}
+
+  Empty: {}
+
+operations:
+  # Session
+  - name: Hello
+    id: 1
+    kind: unary
+    request: HelloRequest
+    response: HelloResponse
+    errors: [UNSUPPORTED_VERSION, UNSUPPORTED_OPERATION]
+
+  - name: Ping
+    id: 2
+    kind: unary
+    request: Empty
+    response: Empty
+
+  # Handle I/O. Handle offsets serialize per handle on the server.
+  - name: Open
+    id: 10
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+      flags: {id: 2, type: uint32, required: true}
+      mode: {id: 3, type: uint32}
+    response:
+      handle: {id: 1, type: uint64, required: true}
+    errors: [ENOENT, EACCES, EEXIST, EISDIR, ENOTDIR, EINVAL, ELOOP]
+
+  - name: Close
+    id: 11
+    kind: unary
+    request:
+      handle: {id: 1, type: uint64, required: true}
+    response: Empty
+    errors: [EBADF]
+
+  - name: Read
+    id: 12
+    kind: data_response
+    request:
+      handle: {id: 1, type: uint64, required: true}
+      length: {id: 2, type: uint32, required: true}
+    response:
+      count: {id: 1, type: uint32, required: true}
+    errors: [EBADF, EISDIR, EIO]
+
+  - name: Write
+    id: 13
+    kind: data_request
+    request:
+      handle: {id: 1, type: uint64, required: true}
+    response:
+      count: {id: 1, type: uint32, required: true}
+    errors: [EBADF, EIO, ENOSPC, EFBIG, EROFS]
+
+  - name: ReadAt
+    id: 14
+    kind: data_response
+    request:
+      handle: {id: 1, type: uint64, required: true}
+      offset: {id: 2, type: int64, required: true}
+      length: {id: 3, type: uint32, required: true}
+    response:
+      count: {id: 1, type: uint32, required: true}
+    errors: [EBADF, EINVAL, EISDIR, EIO]
+
+  - name: WriteAt
+    id: 15
+    kind: data_request
+    request:
+      handle: {id: 1, type: uint64, required: true}
+      offset: {id: 2, type: int64, required: true}
+    response:
+      count: {id: 1, type: uint32, required: true}
+    errors: [EBADF, EINVAL, EIO, ENOSPC, EFBIG, EROFS]
+
+  - name: Seek
+    id: 16
+    kind: unary
+    request:
+      handle: {id: 1, type: uint64, required: true}
+      offset: {id: 2, type: int64, required: true}
+      whence: {id: 3, type: Whence, required: true}
+    response:
+      offset: {id: 1, type: int64, required: true}
+    errors: [EBADF, EINVAL]
+
+  - name: Fsync
+    id: 17
+    kind: unary
+    request:
+      handle: {id: 1, type: uint64, required: true}
+      data_only: {id: 2, type: bool}
+    response: Empty
+    errors: [EBADF, EIO]
+
+  - name: Flush
+    id: 18
+    kind: unary
+    request:
+      handle: {id: 1, type: uint64, required: true}
+    response: Empty
+    errors: [EBADF, EIO]
+
+  - name: Ftruncate
+    id: 19
+    kind: unary
+    request:
+      handle: {id: 1, type: uint64, required: true}
+      size: {id: 2, type: int64, required: true}
+    response: Empty
+    errors: [EBADF, EINVAL, EIO, EFBIG, EROFS]
+
+  # Path metadata and namespace
+  - name: Stat
+    id: 20
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+    response:
+      info: {id: 1, type: FileInfo, required: true}
+    errors: [ENOENT, EACCES, ENOTDIR, ELOOP]
+
+  - name: Lstat
+    id: 21
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+    response:
+      info: {id: 1, type: FileInfo, required: true}
+    errors: [ENOENT, EACCES, ENOTDIR]
+
+  - name: Fstat
+    id: 22
+    kind: unary
+    request:
+      handle: {id: 1, type: uint64, required: true}
+    response:
+      info: {id: 1, type: FileInfo, required: true}
+    errors: [EBADF]
+
+  - name: Mkdir
+    id: 23
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+      mode: {id: 2, type: uint32}
+    response: Empty
+    errors: [EEXIST, ENOENT, EACCES, ENOTDIR, EROFS]
+
+  - name: Rmdir
+    id: 24
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+    response: Empty
+    errors: [ENOENT, ENOTEMPTY, ENOTDIR, EACCES, EROFS]
+
+  - name: Unlink
+    id: 25
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+    response: Empty
+    errors: [ENOENT, EISDIR, EACCES, EROFS]
+
+  - name: Rename
+    id: 26
+    kind: unary
+    request:
+      from: {id: 1, type: string, required: true}
+      to: {id: 2, type: string, required: true}
+    response: Empty
+    errors: [ENOENT, EEXIST, ENOTEMPTY, EISDIR, ENOTDIR, EXDEV, EACCES, EROFS]
+
+  - name: Symlink
+    id: 27
+    kind: unary
+    request:
+      target: {id: 1, type: string, required: true}
+      link_path: {id: 2, type: string, required: true}
+    response: Empty
+    errors: [EEXIST, ENOENT, EACCES, EROFS]
+
+  - name: Readlink
+    id: 28
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+    response:
+      target: {id: 1, type: string, required: true}
+    errors: [ENOENT, EINVAL]
+
+  - name: Link
+    id: 29
+    kind: unary
+    request:
+      existing: {id: 1, type: string, required: true}
+      new_path: {id: 2, type: string, required: true}
+    response: Empty
+    errors: [EEXIST, ENOENT, EPERM, EXDEV, EROFS]
+
+  - name: Chmod
+    id: 30
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+      mode: {id: 2, type: uint32, required: true}
+    response: Empty
+    errors: [ENOENT, EPERM, EROFS]
+
+  - name: Utimens
+    id: 31
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+      atime_ns: {id: 2, type: int64}
+      mtime_ns: {id: 3, type: int64}
+      set_atime: {id: 4, type: bool}
+      set_mtime: {id: 5, type: bool}
+    response: Empty
+    errors: [ENOENT, EPERM, EROFS]
+
+  - name: Truncate
+    id: 32
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+      size: {id: 2, type: int64, required: true}
+    response: Empty
+    errors: [ENOENT, EISDIR, EINVAL, EIO, EFBIG, EROFS]
+
+  - name: Statfs
+    id: 33
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+    response:
+      block_size: {id: 1, type: uint32, required: true}
+      blocks: {id: 2, type: uint64, required: true}
+      blocks_free: {id: 3, type: uint64, required: true}
+      blocks_avail: {id: 4, type: uint64, required: true}
+      files: {id: 5, type: uint64, required: true}
+      files_free: {id: 6, type: uint64, required: true}
+      name_max: {id: 7, type: uint32, required: true}
+    errors: [ENOENT, EIO]
+
+  - name: Access
+    id: 34
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+      mode: {id: 2, type: uint32, required: true}
+    response: Empty
+    errors: [ENOENT, EACCES, EROFS]
+
+  # Directories
+  - name: Opendir
+    id: 40
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+    response:
+      handle: {id: 1, type: uint64, required: true}
+    errors: [ENOENT, ENOTDIR, EACCES]
+
+  - name: Readdir
+    id: 41
+    kind: unary
+    request:
+      handle: {id: 1, type: uint64, required: true}
+      max_entries: {id: 2, type: uint32, required: true}
+    response:
+      entries: {id: 1, type: "repeated DirEntry", required: true}
+      eof: {id: 2, type: bool, required: true}
+    errors: [EBADF, EIO]
+
+  - name: Closedir
+    id: 42
+    kind: unary
+    request:
+      handle: {id: 1, type: uint64, required: true}
+    response: Empty
+    errors: [EBADF]
+
+  # Extensions: one round trip for directory listing with attributes.
+  - name: Ls
+    id: 43
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+      max_entries: {id: 2, type: uint32}
+      cursor: {id: 3, type: string}
+    response:
+      entries: {id: 1, type: "repeated DirEntry", required: true}
+      next_cursor: {id: 2, type: string}
+    errors: [ENOENT, ENOTDIR, EACCES, EIO]
+    capability: ls_stat
+
+  # Extensions: bulk operations. Each item carries its own result, so one
+  # failure does not abort the batch. Batches are not atomic.
+  - name: StatBatch
+    id: 50
+    kind: unary
+    request:
+      paths: {id: 1, type: "repeated string", required: true}
+    response:
+      infos: {id: 1, type: "repeated FileInfo", required: true}
+      errors: {id: 2, type: "repeated BatchItemError", required: true}
+    capability: bulk_io
+
+  - name: ReadBatch
+    id: 51
+    kind: data_response
+    request:
+      handle: {id: 1, type: uint64, required: true}
+      ranges: {id: 2, type: "repeated Range", required: true}
+    response:
+      counts: {id: 1, type: "repeated uint32", required: true}
+      errors: {id: 2, type: "repeated BatchItemError", required: true}
+    capability: bulk_io
+
+  - name: WriteBatch
+    id: 52
+    kind: data_request
+    request:
+      handle: {id: 1, type: uint64, required: true}
+      ranges: {id: 2, type: "repeated Range", required: true}
+    response:
+      counts: {id: 1, type: "repeated uint32", required: true}
+      errors: {id: 2, type: "repeated BatchItemError", required: true}
+    capability: bulk_io
+
+  - name: ReadFile
+    id: 53
+    kind: data_response
+    request:
+      path: {id: 1, type: string, required: true}
+      max_bytes: {id: 2, type: uint64}
+    response:
+      count: {id: 1, type: uint32, required: true}
+    errors: [ENOENT, EISDIR, EACCES, EIO]
+    capability: bulk_io
+
+  - name: WriteFile
+    id: 54
+    kind: data_request
+    request:
+      path: {id: 1, type: string, required: true}
+      truncate: {id: 2, type: bool}
+    response:
+      count: {id: 1, type: uint32, required: true}
+    errors: [EISDIR, EACCES, EIO, ENOSPC, EROFS]
+    capability: bulk_io
+
+  # Recursive removal. Removes children before the parent. Stops at the first
+  # error and reports the number of entries removed before it.
+  - name: RemoveAll
+    id: 55
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+    response:
+      removed: {id: 1, type: uint64, required: true}
+    errors: [ENOENT, EACCES, EROFS, EIO]
+    capability: remove_all
+
+  # Watch. The call returns a watch id at once. Changes then arrive as Notice
+  # frames (kind CHANGE, ref_id equal to the watch id, with change_kind, path, and
+  # old_path) on the same connection, so the caller never polls and needs no
+  # separate stream. Unwatch takes the watch id and must be sent on the connection
+  # that made the Watch call. Events are not stored. A since_sequence older than the
+  # latest notice yields one OVERFLOW notice for the watch, and a watch whose
+  # client reads too slowly also gets OVERFLOW, which tells the client to list the
+  # path again. The watch ends when its connection closes.
+  - name: Watch
+    id: 60
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+      recursive: {id: 2, type: bool}
+      since_sequence: {id: 3, type: uint64}
+    response:
+      watch_id: {id: 1, type: uint64, required: true}
+    errors: [ENOENT, ENOTDIR, EACCES]
+    capability: watch
+
+  - name: Unwatch
+    id: 61
+    kind: unary
+    request:
+      watch_id: {id: 1, type: uint64, required: true}
+    response: Empty
+    errors: [EBADF]
+    capability: watch
+
+  # Warming. WarmOpen and WarmRead return as soon as the server accepts the work
+  # and give a warm id. The work runs in the background at low priority. The
+  # result arrives later as a Notice frame on the same connection (kind WARM_DONE
+  # or WARM_FAILED, ref_id equal to the warm id, with code, message, and path for a
+  # failure), so the caller never polls. A path that does not exist is such an
+  # asynchronous failure, never an error at the acknowledgement. A full queue is
+  # the one immediate failure and returns EAGAIN. WarmOpen warms the file's
+  # metadata and leading data. WarmRead warms a byte range, and length 0 means to
+  # the end of the file. Warming fills the mount's local cache, so a mount with
+  # no local cache (started with --disable-cache-dir) refuses both calls at once
+  # with UNSUPPORTED_OPERATION and a message that says why.
+  - name: WarmOpen
+    id: 70
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+    response:
+      warm_id: {id: 1, type: uint64, required: true}
+    errors: [EAGAIN, EINVAL, UNSUPPORTED_OPERATION]
+    capability: warm
+
+  - name: WarmRead
+    id: 71
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+      offset: {id: 2, type: int64}
+      length: {id: 3, type: int64}
+    response:
+      warm_id: {id: 1, type: uint64, required: true}
+    errors: [EAGAIN, EINVAL, UNSUPPORTED_OPERATION]
+    capability: warm
+
+  # Server-initiated frames: warm results and watch changes. Their frame header
+  # carries the notify flag (8) and method 62, and the request id field holds the
+  # id of the call the notice answers. A client never sends this method. Notices go
+  # only to the connection that made the call, and a notice for a connection that
+  # has closed is dropped. The server also sends CLOSING on every connection before
+  # it closes them, for example on unmount.
+  - name: Notice
+    id: 62
+    kind: server_push
+    request: Empty
+    response: Notice
+    capability: warm
+
+errorCodes:
+  # Protocol errors. Filesystem failures use POSIX names (see errno mapping in each SDK).
+  - { code: 1001, name: UNSUPPORTED_VERSION }
+  - { code: 1002, name: UNSUPPORTED_OPERATION }
+  - { code: 1003, name: SESSION_CLOSED }
+  - { code: 1004, name: DEADLINE_EXCEEDED }
+  - { code: 1005, name: FRAME_TOO_LARGE }
+  - { code: 1006, name: MALFORMED_FRAME }
+  - { code: 1007, name: TOO_MANY_INFLIGHT }
+  - { code: 1008, name: PERMISSION_DENIED_PEER }

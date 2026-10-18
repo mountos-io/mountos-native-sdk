@@ -1,0 +1,62 @@
+# Public client API layer. api/filesystem.yaml is the wire contract. This file
+# decides how each operation shows up in the SDKs.
+#
+# Per operation:
+#   scope   client (path based), file (handle based), or dir (directory handle).
+#           Default: file when the request has a `handle` field, else client.
+#   name    Public method name when it differs from the operation name.
+#   doc     One line of documentation, copied into every language.
+#   result  Name of the result struct for operations with several response fields.
+#   defaults Integer defaults for parameters, keyed by wire field name. Languages
+#           with default parameters (TypeScript) apply them. Others ignore them.
+#   custom  Hand-written logic. The generator emits no stub.
+#   planned Not served yet. The generator emits no stub.
+#
+# Every operation in filesystem.yaml must appear here exactly once.
+
+# Read, Write, and Seek are served, but the SDKs keep the file cursor on the
+# client side and use ReadAt and WriteAt, so they are hand-written or unused.
+
+ops:
+  Hello: {custom: true}
+  Ping: {doc: "Checks that the server answers."}
+  Open: {custom: true}
+  Close: {custom: true}
+  Read: {custom: true}
+  Write: {custom: true}
+  ReadAt: {custom: true}
+  WriteAt: {custom: true}
+  Seek: {custom: true}
+  Fsync: {custom: true}
+  Flush: {doc: "Flushes client buffers for the open file."}
+  Ftruncate: {name: Truncate, doc: "Sets the size of the open file."}
+  Stat: {doc: "Returns attributes for path."}
+  Lstat: {doc: "Returns attributes for path without following a final symlink."}
+  Fstat: {name: Stat, doc: "Returns attributes of the open file."}
+  Mkdir: {defaults: {mode: 493}, doc: "Creates a directory."}  # 493 is 0755
+  Rmdir: {doc: "Removes an empty directory."}
+  Unlink: {doc: "Removes a file."}
+  Rename: {doc: "Moves from to to."}
+  Symlink: {doc: "Creates link_path pointing at target."}
+  Readlink: {doc: "Returns the target of the symlink at path."}
+  Link: {doc: "Creates new_path as a hard link to existing."}
+  Chmod: {doc: "Sets the mode of path."}
+  Utimens: {custom: true}
+  Truncate: {doc: "Sets the size of the file at path."}
+  Statfs: {result: StatfsInfo, doc: "Returns capacity figures for the filesystem holding path."}
+  Access: {defaults: {mode: 0}, doc: "Checks permissions for path. mode is a bit mask of 4 (read), 2 (write), 1 (execute), or 0 (exists)."}
+  Opendir: {custom: true}
+  Readdir: {custom: true}
+  Closedir: {custom: true}
+  Ls: {custom: true}
+  StatBatch: {custom: true}
+  ReadBatch: {custom: true}
+  WriteBatch: {custom: true}
+  ReadFile: {custom: true}
+  WriteFile: {custom: true}
+  WarmOpen: {doc: "Starts warming the file in the background and returns a warm id at once. A missing file is reported later as a warm_failed notice on the same connection. Fails at once when the mount has no local cache."}
+  WarmRead: {defaults: {offset: 0, length: 0}, doc: "Starts reading a file in the background to warm the cache and returns a warm id at once. Offset 0 and length 0, the defaults, warm the whole file. A length of 0 with an offset warms to the end of the file."}
+  Notice: {custom: true}
+  RemoveAll: {doc: "Removes path and everything below it. Returns the removed entry count."}
+  Watch: {custom: true}
+  Unwatch: {custom: true}

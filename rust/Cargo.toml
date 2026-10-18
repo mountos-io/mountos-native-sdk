@@ -1,0 +1,12 @@
+[package]
+name = "mountos-native"
+version = "0.1.0"
+edition = "2021"
+description = "Client for the mountOS native filesystem API"
+license = "Apache-2.0"
+
+[dependencies]
+prost = "0.13"
+
+[build-dependencies]
+prost-build = "0.13"

@@ -1,0 +1,1452 @@
+{
+  "version": 1,
+  "minorVersion": 5,
+  "capabilities": [
+    "bulk_io",
+    "ls_stat",
+    "remove_all",
+    "watch",
+    "warm"
+  ],
+  "enums": {
+    "FileType": {
+      "DIRECTORY": 1,
+      "REGULAR": 0,
+      "SYMLINK": 2
+    },
+    "NoticeKind": {
+      "CHANGE": 4,
+      "CLOSING": 2,
+      "OVERFLOW": 3,
+      "WARM_DONE": 0,
+      "WARM_FAILED": 1
+    },
+    "OpenFlag": {
+      "APPEND": 1024,
+      "CREATE": 64,
+      "EXCL": 128,
+      "READ_ONLY": 0,
+      "READ_WRITE": 2,
+      "TRUNC": 512,
+      "WRITE_ONLY": 1
+    },
+    "WatchEventKind": {
+      "ATTRIB": 4,
+      "CREATE": 0,
+      "OVERFLOW": 5,
+      "REMOVE": 1,
+      "RENAME": 3,
+      "WRITE": 2
+    },
+    "Whence": {
+      "CUR": 1,
+      "END": 2,
+      "SET": 0
+    }
+  },
+  "messages": {
+    "BatchItemError": {
+      "code": {
+        "id": 2,
+        "type": "string",
+        "required": true
+      },
+      "index": {
+        "id": 1,
+        "type": "uint32",
+        "required": true
+      },
+      "message": {
+        "id": 3,
+        "type": "string"
+      }
+    },
+    "DirEntry": {
+      "info": {
+        "id": 3,
+        "type": "FileInfo"
+      },
+      "name": {
+        "id": 1,
+        "type": "string",
+        "required": true
+      },
+      "type": {
+        "id": 2,
+        "type": "FileType",
+        "required": true
+      }
+    },
+    "Empty": {},
+    "FileInfo": {
+      "atime_ns": {
+        "id": 6,
+        "type": "int64"
+      },
+      "ctime_ns": {
+        "id": 7,
+        "type": "int64"
+      },
+      "gid": {
+        "id": 9,
+        "type": "uint32"
+      },
+      "inode": {
+        "id": 11,
+        "type": "uint64"
+      },
+      "mode": {
+        "id": 3,
+        "type": "uint32"
+      },
+      "mtime_ns": {
+        "id": 5,
+        "type": "int64"
+      },
+      "name": {
+        "id": 1,
+        "type": "string"
+      },
+      "nlink": {
+        "id": 10,
+        "type": "uint32"
+      },
+      "size": {
+        "id": 2,
+        "type": "int64"
+      },
+      "type": {
+        "id": 4,
+        "type": "FileType"
+      },
+      "uid": {
+        "id": 8,
+        "type": "uint32"
+      }
+    },
+    "HelloRequest": {
+      "capabilities": {
+        "id": 4,
+        "type": "repeated string"
+      },
+      "client_name": {
+        "id": 1,
+        "type": "string"
+      },
+      "max_version": {
+        "id": 3,
+        "type": "uint32",
+        "required": true
+      },
+      "min_version": {
+        "id": 2,
+        "type": "uint32",
+        "required": true
+      }
+    },
+    "HelloResponse": {
+      "capabilities": {
+        "id": 2,
+        "type": "repeated string"
+      },
+      "max_inflight": {
+        "id": 4,
+        "type": "uint32",
+        "required": true
+      },
+      "max_payload_bytes": {
+        "id": 3,
+        "type": "uint32",
+        "required": true
+      },
+      "version": {
+        "id": 1,
+        "type": "uint32",
+        "required": true
+      }
+    },
+    "Notice": {
+      "change_kind": {
+        "id": 7,
+        "type": "WatchEventKind"
+      },
+      "code": {
+        "id": 5,
+        "type": "string"
+      },
+      "kind": {
+        "id": 1,
+        "type": "NoticeKind",
+        "required": true
+      },
+      "message": {
+        "id": 6,
+        "type": "string"
+      },
+      "old_path": {
+        "id": 8,
+        "type": "string"
+      },
+      "path": {
+        "id": 4,
+        "type": "string"
+      },
+      "ref_id": {
+        "id": 3,
+        "type": "uint64"
+      },
+      "sequence": {
+        "id": 2,
+        "type": "uint64",
+        "required": true
+      }
+    },
+    "Range": {
+      "length": {
+        "id": 2,
+        "type": "uint32",
+        "required": true
+      },
+      "offset": {
+        "id": 1,
+        "type": "int64",
+        "required": true
+      }
+    },
+    "WireError": {
+      "code": {
+        "id": 1,
+        "type": "string",
+        "required": true
+      },
+      "message": {
+        "id": 2,
+        "type": "string"
+      }
+    }
+  },
+  "operations": {
+    "1": {
+      "name": "Hello",
+      "kind": "unary",
+      "request": {
+        "ref": "HelloRequest"
+      },
+      "response": {
+        "ref": "HelloResponse"
+      },
+      "errors": [
+        "UNSUPPORTED_VERSION",
+        "UNSUPPORTED_OPERATION"
+      ]
+    },
+    "10": {
+      "name": "Open",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "flags": {
+            "id": 2,
+            "type": "uint32",
+            "required": true
+          },
+          "mode": {
+            "id": 3,
+            "type": "uint32"
+          },
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "EACCES",
+        "EEXIST",
+        "EISDIR",
+        "ENOTDIR",
+        "EINVAL",
+        "ELOOP"
+      ]
+    },
+    "11": {
+      "name": "Close",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "EBADF"
+      ]
+    },
+    "12": {
+      "name": "Read",
+      "kind": "data_response",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          },
+          "length": {
+            "id": 2,
+            "type": "uint32",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "count": {
+            "id": 1,
+            "type": "uint32",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "EBADF",
+        "EISDIR",
+        "EIO"
+      ]
+    },
+    "13": {
+      "name": "Write",
+      "kind": "data_request",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "count": {
+            "id": 1,
+            "type": "uint32",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "EBADF",
+        "EIO",
+        "ENOSPC",
+        "EFBIG",
+        "EROFS"
+      ]
+    },
+    "14": {
+      "name": "ReadAt",
+      "kind": "data_response",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          },
+          "length": {
+            "id": 3,
+            "type": "uint32",
+            "required": true
+          },
+          "offset": {
+            "id": 2,
+            "type": "int64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "count": {
+            "id": 1,
+            "type": "uint32",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "EBADF",
+        "EINVAL",
+        "EISDIR",
+        "EIO"
+      ]
+    },
+    "15": {
+      "name": "WriteAt",
+      "kind": "data_request",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          },
+          "offset": {
+            "id": 2,
+            "type": "int64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "count": {
+            "id": 1,
+            "type": "uint32",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "EBADF",
+        "EINVAL",
+        "EIO",
+        "ENOSPC",
+        "EFBIG",
+        "EROFS"
+      ]
+    },
+    "16": {
+      "name": "Seek",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          },
+          "offset": {
+            "id": 2,
+            "type": "int64",
+            "required": true
+          },
+          "whence": {
+            "id": 3,
+            "type": "Whence",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "offset": {
+            "id": 1,
+            "type": "int64",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "EBADF",
+        "EINVAL"
+      ]
+    },
+    "17": {
+      "name": "Fsync",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "data_only": {
+            "id": 2,
+            "type": "bool"
+          },
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "EBADF",
+        "EIO"
+      ]
+    },
+    "18": {
+      "name": "Flush",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "EBADF",
+        "EIO"
+      ]
+    },
+    "19": {
+      "name": "Ftruncate",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          },
+          "size": {
+            "id": 2,
+            "type": "int64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "EBADF",
+        "EINVAL",
+        "EIO",
+        "EFBIG",
+        "EROFS"
+      ]
+    },
+    "2": {
+      "name": "Ping",
+      "kind": "unary",
+      "request": {
+        "ref": "Empty"
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": null
+    },
+    "20": {
+      "name": "Stat",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "info": {
+            "id": 1,
+            "type": "FileInfo",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "EACCES",
+        "ENOTDIR",
+        "ELOOP"
+      ]
+    },
+    "21": {
+      "name": "Lstat",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "info": {
+            "id": 1,
+            "type": "FileInfo",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "EACCES",
+        "ENOTDIR"
+      ]
+    },
+    "22": {
+      "name": "Fstat",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "info": {
+            "id": 1,
+            "type": "FileInfo",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "EBADF"
+      ]
+    },
+    "23": {
+      "name": "Mkdir",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "mode": {
+            "id": 2,
+            "type": "uint32"
+          },
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "EEXIST",
+        "ENOENT",
+        "EACCES",
+        "ENOTDIR",
+        "EROFS"
+      ]
+    },
+    "24": {
+      "name": "Rmdir",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "ENOENT",
+        "ENOTEMPTY",
+        "ENOTDIR",
+        "EACCES",
+        "EROFS"
+      ]
+    },
+    "25": {
+      "name": "Unlink",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "ENOENT",
+        "EISDIR",
+        "EACCES",
+        "EROFS"
+      ]
+    },
+    "26": {
+      "name": "Rename",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "from": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          },
+          "to": {
+            "id": 2,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "ENOENT",
+        "EEXIST",
+        "ENOTEMPTY",
+        "EISDIR",
+        "ENOTDIR",
+        "EXDEV",
+        "EACCES",
+        "EROFS"
+      ]
+    },
+    "27": {
+      "name": "Symlink",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "link_path": {
+            "id": 2,
+            "type": "string",
+            "required": true
+          },
+          "target": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "EEXIST",
+        "ENOENT",
+        "EACCES",
+        "EROFS"
+      ]
+    },
+    "28": {
+      "name": "Readlink",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "target": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "EINVAL"
+      ]
+    },
+    "29": {
+      "name": "Link",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "existing": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          },
+          "new_path": {
+            "id": 2,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "EEXIST",
+        "ENOENT",
+        "EPERM",
+        "EXDEV",
+        "EROFS"
+      ]
+    },
+    "30": {
+      "name": "Chmod",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "mode": {
+            "id": 2,
+            "type": "uint32",
+            "required": true
+          },
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "ENOENT",
+        "EPERM",
+        "EROFS"
+      ]
+    },
+    "31": {
+      "name": "Utimens",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "atime_ns": {
+            "id": 2,
+            "type": "int64"
+          },
+          "mtime_ns": {
+            "id": 3,
+            "type": "int64"
+          },
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          },
+          "set_atime": {
+            "id": 4,
+            "type": "bool"
+          },
+          "set_mtime": {
+            "id": 5,
+            "type": "bool"
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "ENOENT",
+        "EPERM",
+        "EROFS"
+      ]
+    },
+    "32": {
+      "name": "Truncate",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          },
+          "size": {
+            "id": 2,
+            "type": "int64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "ENOENT",
+        "EISDIR",
+        "EINVAL",
+        "EIO",
+        "EFBIG",
+        "EROFS"
+      ]
+    },
+    "33": {
+      "name": "Statfs",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "block_size": {
+            "id": 1,
+            "type": "uint32",
+            "required": true
+          },
+          "blocks": {
+            "id": 2,
+            "type": "uint64",
+            "required": true
+          },
+          "blocks_avail": {
+            "id": 4,
+            "type": "uint64",
+            "required": true
+          },
+          "blocks_free": {
+            "id": 3,
+            "type": "uint64",
+            "required": true
+          },
+          "files": {
+            "id": 5,
+            "type": "uint64",
+            "required": true
+          },
+          "files_free": {
+            "id": 6,
+            "type": "uint64",
+            "required": true
+          },
+          "name_max": {
+            "id": 7,
+            "type": "uint32",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "EIO"
+      ]
+    },
+    "34": {
+      "name": "Access",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "mode": {
+            "id": 2,
+            "type": "uint32",
+            "required": true
+          },
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "ENOENT",
+        "EACCES",
+        "EROFS"
+      ]
+    },
+    "40": {
+      "name": "Opendir",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "ENOTDIR",
+        "EACCES"
+      ]
+    },
+    "41": {
+      "name": "Readdir",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          },
+          "max_entries": {
+            "id": 2,
+            "type": "uint32",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "entries": {
+            "id": 1,
+            "type": "repeated DirEntry",
+            "required": true
+          },
+          "eof": {
+            "id": 2,
+            "type": "bool",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "EBADF",
+        "EIO"
+      ]
+    },
+    "42": {
+      "name": "Closedir",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "EBADF"
+      ]
+    },
+    "43": {
+      "name": "Ls",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "cursor": {
+            "id": 3,
+            "type": "string"
+          },
+          "max_entries": {
+            "id": 2,
+            "type": "uint32"
+          },
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "entries": {
+            "id": 1,
+            "type": "repeated DirEntry",
+            "required": true
+          },
+          "next_cursor": {
+            "id": 2,
+            "type": "string"
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "ENOTDIR",
+        "EACCES",
+        "EIO"
+      ],
+      "capability": "ls_stat"
+    },
+    "50": {
+      "name": "StatBatch",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "paths": {
+            "id": 1,
+            "type": "repeated string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "errors": {
+            "id": 2,
+            "type": "repeated BatchItemError",
+            "required": true
+          },
+          "infos": {
+            "id": 1,
+            "type": "repeated FileInfo",
+            "required": true
+          }
+        }
+      },
+      "errors": null,
+      "capability": "bulk_io"
+    },
+    "51": {
+      "name": "ReadBatch",
+      "kind": "data_response",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          },
+          "ranges": {
+            "id": 2,
+            "type": "repeated Range",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "counts": {
+            "id": 1,
+            "type": "repeated uint32",
+            "required": true
+          },
+          "errors": {
+            "id": 2,
+            "type": "repeated BatchItemError",
+            "required": true
+          }
+        }
+      },
+      "errors": null,
+      "capability": "bulk_io"
+    },
+    "52": {
+      "name": "WriteBatch",
+      "kind": "data_request",
+      "request": {
+        "fields": {
+          "handle": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          },
+          "ranges": {
+            "id": 2,
+            "type": "repeated Range",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "counts": {
+            "id": 1,
+            "type": "repeated uint32",
+            "required": true
+          },
+          "errors": {
+            "id": 2,
+            "type": "repeated BatchItemError",
+            "required": true
+          }
+        }
+      },
+      "errors": null,
+      "capability": "bulk_io"
+    },
+    "53": {
+      "name": "ReadFile",
+      "kind": "data_response",
+      "request": {
+        "fields": {
+          "max_bytes": {
+            "id": 2,
+            "type": "uint64"
+          },
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "count": {
+            "id": 1,
+            "type": "uint32",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "EISDIR",
+        "EACCES",
+        "EIO"
+      ],
+      "capability": "bulk_io"
+    },
+    "54": {
+      "name": "WriteFile",
+      "kind": "data_request",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          },
+          "truncate": {
+            "id": 2,
+            "type": "bool"
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "count": {
+            "id": 1,
+            "type": "uint32",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "EISDIR",
+        "EACCES",
+        "EIO",
+        "ENOSPC",
+        "EROFS"
+      ],
+      "capability": "bulk_io"
+    },
+    "55": {
+      "name": "RemoveAll",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "removed": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "EACCES",
+        "EROFS",
+        "EIO"
+      ],
+      "capability": "remove_all"
+    },
+    "60": {
+      "name": "Watch",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          },
+          "recursive": {
+            "id": 2,
+            "type": "bool"
+          },
+          "since_sequence": {
+            "id": 3,
+            "type": "uint64"
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "watch_id": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "ENOTDIR",
+        "EACCES"
+      ],
+      "capability": "watch"
+    },
+    "61": {
+      "name": "Unwatch",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "watch_id": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "EBADF"
+      ],
+      "capability": "watch"
+    },
+    "62": {
+      "name": "Notice",
+      "kind": "server_push",
+      "request": {
+        "ref": "Empty"
+      },
+      "response": {
+        "ref": "Notice"
+      },
+      "errors": null,
+      "capability": "warm"
+    },
+    "70": {
+      "name": "WarmOpen",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "warm_id": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "EAGAIN",
+        "EINVAL",
+        "UNSUPPORTED_OPERATION"
+      ],
+      "capability": "warm"
+    },
+    "71": {
+      "name": "WarmRead",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "length": {
+            "id": 3,
+            "type": "int64"
+          },
+          "offset": {
+            "id": 2,
+            "type": "int64"
+          },
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "warm_id": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "EAGAIN",
+        "EINVAL",
+        "UNSUPPORTED_OPERATION"
+      ],
+      "capability": "warm"
+    }
+  },
+  "errorCodes": {
+    "DEADLINE_EXCEEDED": 1004,
+    "FRAME_TOO_LARGE": 1005,
+    "MALFORMED_FRAME": 1006,
+    "PERMISSION_DENIED_PEER": 1008,
+    "SESSION_CLOSED": 1003,
+    "TOO_MANY_INFLIGHT": 1007,
+    "UNSUPPORTED_OPERATION": 1002,
+    "UNSUPPORTED_VERSION": 1001
+  }
+}
