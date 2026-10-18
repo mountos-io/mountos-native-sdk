@@ -18,12 +18,12 @@ type Dir struct {
 	closed bool
 }
 
-// Readdir returns up to max entries and whether the listing reached its end.
-func (d *Dir) Readdir(max uint32) ([]*DirEntry, bool, error) {
+// Readdir returns up to limit entries and whether the listing reached its end.
+func (d *Dir) Readdir(limit uint32) ([]*DirEntry, bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var r wire.ReaddirResponse
-	if err := d.do(mReaddir, &wire.ReaddirRequest{Handle: d.handle, MaxEntries: max}, &r); err != nil {
+	if err := d.do(mReaddir, &wire.ReaddirRequest{Handle: d.handle, MaxEntries: limit}, &r); err != nil {
 		return nil, false, err
 	}
 	return r.GetEntries(), r.GetEof(), nil

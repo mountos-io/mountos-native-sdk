@@ -15,13 +15,13 @@ type pagedLister struct {
 	calls int
 }
 
-func (l *pagedLister) ls(path string, max uint32, cursor string) ([]*DirEntryWithInfo, string, error) {
+func (l *pagedLister) ls(path string, limit uint32, cursor string) ([]*DirEntryWithInfo, string, error) {
 	l.calls++
 	pos := 0
 	if cursor != "" {
 		fmt.Sscanf(cursor, "c%d", &pos)
 	}
-	end := pos + int(max)
+	end := pos + int(limit)
 	if l.total >= 0 && end > l.total {
 		end = l.total
 	}
@@ -80,7 +80,7 @@ func TestReadDirAllOptionOverride(t *testing.T) {
 }
 
 // Every directory of the synthetic tree has one subdirectory, so the tree is endless.
-func deepLister(path string, max uint32, cursor string) ([]*DirEntryWithInfo, string, error) {
+func deepLister(path string, limit uint32, cursor string) ([]*DirEntryWithInfo, string, error) {
 	return []*DirEntryWithInfo{{Name: "d", Type: wire.FileType_FILE_TYPE_DIRECTORY}}, "", nil
 }
 

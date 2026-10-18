@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/rand"
 	"runtime"
+	"slices"
 	"testing"
 )
 
@@ -73,7 +74,7 @@ func FuzzRoundTrip(f *testing.F) {
 			!bytes.Equal(got.Meta, meta) || !bytes.Equal(got.Payload, payload) {
 			t.Fatalf("round trip mismatch: got %+v want %+v", got, want)
 		}
-		if _, err := Read(&buf, fuzzLimits); err != io.EOF {
+		if _, err := Read(&buf, fuzzLimits); !errors.Is(err, io.EOF) {
 			t.Fatalf("after last frame: %v, want io.EOF", err)
 		}
 	})
@@ -105,7 +106,7 @@ func TestRoundTripStreamRandom(t *testing.T) {
 			t.Fatalf("frame %d mismatch", i)
 		}
 	}
-	if _, err := Read(&buf, fuzzLimits); err != io.EOF {
+	if _, err := Read(&buf, fuzzLimits); !errors.Is(err, io.EOF) {
 		t.Fatalf("tail: %v, want io.EOF", err)
 	}
 }
@@ -125,7 +126,7 @@ func TestStalledClaimAllocatesLittle(t *testing.T) {
 		t.Fatal(err)
 	}
 	hdr[20], hdr[21], hdr[22], hdr[23] = 0x3f, 0xff, 0xff, 0xff // payload claim just under 1 GiB
-	body := append(hdr, make([]byte, 100<<10)...)               // 100 KiB arrives, then EOF
+	body := append(slices.Clone(hdr), make([]byte, 100<<10)...) // 100 KiB arrives, then EOF
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
@@ -148,7 +149,7 @@ func TestTruncatedPrefixes(t *testing.T) {
 	for n := 0; n < len(full); n++ {
 		_, err := Read(bytes.NewReader(full[:n]), fuzzLimits)
 		switch {
-		case n == 0 && err == io.EOF:
+		case n == 0 && errors.Is(err, io.EOF):
 		case n > 0 && errors.Is(err, io.ErrUnexpectedEOF):
 		default:
 			t.Fatalf("prefix %d: err = %v", n, err)

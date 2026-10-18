@@ -25,3 +25,12 @@ pre-commit:
     version-check:
       glob: "{api/**,ts/package.json,ts/package-lock.json,rust/Cargo.toml}"
       run: make version-check
+    lint-go:
+      glob: "{go/**/*.go,gen/**/*.go,.golangci.yml}"
+      run: make go-check lint
+    lint-ts:
+      glob: "{ts/src/**,ts/test/**,ts/eslint.config.js,ts/package.json,ts/tsconfig.json}"
+      run: make ts-check ts-lint
+    lint-rust:
+      glob: "{rust/**/*.rs,rust/Cargo.toml,rust/rustfmt.toml}"
+      run: make rust-fmt rust-check

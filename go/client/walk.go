@@ -82,7 +82,7 @@ func newDirOpts(opts []DirOption) dirOpts {
 	return o
 }
 
-type lsFunc func(path string, max uint32, cursor string) ([]*DirEntryWithInfo, string, error)
+type lsFunc func(path string, limit uint32, cursor string) ([]*DirEntryWithInfo, string, error)
 
 // ReadDirAll lists every entry of path with attributes, in server order. It
 // returns a *TooManyEntriesError (matching ErrTooManyEntries) when the
@@ -136,7 +136,7 @@ func walkDir(ls lsFunc, dir string, depth, maxDepth int, fn func(string, *DirEnt
 			p := path.Join(dir, e.GetName())
 			isDir := e.GetType() == wire.FileType_FILE_TYPE_DIRECTORY
 			switch err := fn(p, e); {
-			case err == fs.SkipDir:
+			case errors.Is(err, fs.SkipDir):
 			case err != nil:
 				return err
 			case isDir:

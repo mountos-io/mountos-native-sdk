@@ -143,7 +143,7 @@ func (s *fakeServer) serve(c net.Conn, idx int) {
 
 func (s *fakeServer) reply(c net.Conn, f frame.Frame, resp proto.Message, data []byte, werr *wire.WireError) {
 	out := frame.Frame{Flags: frame.FlagResponse, Method: f.Method, RequestID: f.RequestID, Payload: data}
-	var m proto.Message = resp
+	m := resp
 	if werr != nil {
 		out.Flags |= frame.FlagError
 		m = werr

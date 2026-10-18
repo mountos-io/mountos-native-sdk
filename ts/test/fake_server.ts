@@ -2,7 +2,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
+import { type BinaryReader, type BinaryWriter } from "@bufbuild/protobuf/wire";
 import * as pb from "../src/gen/mountos_fs.js";
 
 interface Codec<T> {

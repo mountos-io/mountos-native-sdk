@@ -110,13 +110,13 @@ func TestReadAtEOF(t *testing.T) {
 	f.WriteAt([]byte("12345"), 0)
 	buf := make([]byte, 10)
 	n, err := f.ReadAt(buf, 0)
-	if n != 5 || err != io.EOF {
+	if n != 5 || !errors.Is(err, io.EOF) {
 		t.Fatalf("short read = %d, %v", n, err)
 	}
 	if n, err = f.ReadAt(buf[:5], 0); n != 5 || err != nil {
 		t.Fatalf("exact read = %d, %v", n, err)
 	}
-	if n, err = f.ReadAt(buf, 5); n != 0 || err != io.EOF {
+	if n, err = f.ReadAt(buf, 5); n != 0 || !errors.Is(err, io.EOF) {
 		t.Fatalf("at end = %d, %v", n, err)
 	}
 }
@@ -234,7 +234,7 @@ func TestParallelDistinctFiles(t *testing.T) {
 			defer wg.Done()
 			buf := make([]byte, 4)
 			if _, err := f.ReadAt(buf, 0); err != nil || string(buf) != "data" {
-				errs <- fmt.Errorf("read %q: %v", buf, err)
+				errs <- fmt.Errorf("read %q: %w", buf, err)
 			}
 		}()
 	}

@@ -126,6 +126,9 @@ make api-gen     # regenerate the proto, wire types, and client stubs for every 
 make api-check   # validate the specs, check compatibility, fail on stale generated files
 make api-update  # write the contract snapshot after a compatible change
 make test        # run the generator tests and every SDK test suite
+make vet         # go vet, golangci-lint, cargo fmt --check, clippy, tsc, eslint
+make check       # vet, govulncheck, and every drift and coherence check
+make audit       # optional dependency audits (npm audit, cargo audit when installed)
 ```
 
 Never edit a generated file. Change the specs and run `make api-gen`. Generated files are `go/wire/*`, `go/client/ops_gen.go`, `ts/src/gen/*`, `ts/src/ops_gen.ts`, `rust/src/ops_gen.rs`, and `api/proto/mountos_fs.proto`.

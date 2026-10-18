@@ -7,7 +7,7 @@ import { FakeServer } from "./fake_server.js";
 const quiet = { warn: (): void => {} };
 
 function entry(name: string, dir: boolean): DirEntry {
-  return { name, type: dir ? FileType.Directory : FileType.Regular } as DirEntry;
+  return { name, type: dir ? FileType.Directory : FileType.Regular };
 }
 
 type LsResult = { entries: DirEntry[]; nextCursor: string };
@@ -31,9 +31,9 @@ describe("directory helper bounds", () => {
     const c = (client = await Client.connect(srv.sockPath, { poolSize: 1, logger: quiet }));
     let calls = 0;
     // An endless directory: every page has 100 entries and a next cursor.
-    c.ls = async (): Promise<LsResult> => {
+    c.ls = (): Promise<LsResult> => {
       calls++;
-      return { entries: Array.from({ length: 100 }, (_, i) => entry(`n${i}`, false)), nextCursor: "more" };
+      return Promise.resolve({ entries: Array.from({ length: 100 }, (_, i) => entry(`n${i}`, false)), nextCursor: "more" });
     };
     await assert.rejects(c.readDirAll("/huge", { maxEntries: 250 }), (e: unknown) => {
       return e instanceof TooManyEntriesError && e.code === "TOO_MANY_ENTRIES" && e.limit === 250 && /250/.test(e.message);
@@ -52,7 +52,7 @@ describe("directory helper bounds", () => {
   it("walk stops at the depth limit", async () => {
     const c = (client = await Client.connect(srv.sockPath, { poolSize: 1, logger: quiet }));
     // Every directory holds one subdirectory, so the tree never ends.
-    c.ls = async (): Promise<LsResult> => ({ entries: [entry("d", true)], nextCursor: "" });
+    c.ls = (): Promise<LsResult> => Promise.resolve({ entries: [entry("d", true)], nextCursor: "" });
     const seen: string[] = [];
     await assert.rejects(
       (async () => {
@@ -67,13 +67,13 @@ describe("directory helper bounds", () => {
     const c = (client = await Client.connect(srv.sockPath, { poolSize: 1, logger: quiet }));
     let calls = 0;
     let biggest = 0;
-    c.ls = async (_p: string, _m = 0, cursor = ""): Promise<LsResult> => {
+    c.ls = (_p: string, _m = 0, cursor = ""): Promise<LsResult> => {
       calls++;
       const from = cursor === "" ? 0 : Number(cursor);
       const end = Math.min(from + 100, 450);
       const entries = Array.from({ length: end - from }, (_, i) => entry(`n${from + i}`, false));
       biggest = Math.max(biggest, entries.length);
-      return { entries, nextCursor: end < 450 ? String(end) : "" };
+      return Promise.resolve({ entries, nextCursor: end < 450 ? String(end) : "" });
     };
     let count = 0;
     for await (const e of c.walk("/f", { maxDepth: 1 })) {

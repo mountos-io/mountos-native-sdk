@@ -67,7 +67,7 @@ func TestReadStreamOfFrames(t *testing.T) {
 			t.Fatalf("frame %d: got %+v, err %v", i, f, err)
 		}
 	}
-	if _, err := Read(&buf, testLimits); err != io.EOF {
+	if _, err := Read(&buf, testLimits); !errors.Is(err, io.EOF) {
 		t.Fatalf("clean end: got %v, want io.EOF", err)
 	}
 }
@@ -230,8 +230,8 @@ func TestWriteBuffersOverTCP(t *testing.T) {
 	defer ln.Close()
 	want := Frame{Flags: FlagResponse, Method: 14, RequestID: 9, Meta: []byte("m"), Payload: bytes.Repeat([]byte{7}, 200<<10)}
 	go func() {
-		c, err := ln.Accept()
-		if err != nil {
+		c, aerr := ln.Accept()
+		if aerr != nil {
 			return
 		}
 		defer c.Close()

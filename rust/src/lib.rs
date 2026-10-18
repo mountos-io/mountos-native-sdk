@@ -12,6 +12,10 @@
 //! event to your listeners in order. `Client::wait_warm` and `Client::watch` build on the same
 //! events. With no listener, events go to the logger in `Options`, or to stderr.
 
+// Library code reports failures as errors. Tests may unwrap.
+#![deny(clippy::dbg_macro, clippy::todo, clippy::unimplemented)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod bulk;
 mod client;
 mod dir;

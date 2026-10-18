@@ -84,7 +84,9 @@ impl Read for Chunky<'_> {
     if self.rng.below(8) == 0 {
       return Err(io::ErrorKind::Interrupted.into());
     }
-    let n = (1 + self.rng.below(buf.len().max(1))).min(self.data.len()).min(buf.len());
+    let n = (1 + self.rng.below(buf.len().max(1)))
+      .min(self.data.len())
+      .min(buf.len());
     buf[..n].copy_from_slice(&self.data[..n]);
     self.data = &self.data[n..];
     Ok(n)
@@ -122,7 +124,10 @@ fn check(frames: &[Frame], fed: usize) {
 
 fn run(name: &str, it: usize, data: &[u8], chunky: Option<u64>) -> Option<Error> {
   let res = catch_unwind(AssertUnwindSafe(|| match chunky {
-    Some(seed) => drain(&mut Chunky { data, rng: Rng(seed | 1) }),
+    Some(seed) => drain(&mut Chunky {
+      data,
+      rng: Rng(seed | 1),
+    }),
     None => drain(&mut Cursor::new(data)),
   }));
   let (frames, err) = res.unwrap_or_else(|_| panic!("{name} iteration {it}: reader panicked on {data:02x?}"));
@@ -144,7 +149,11 @@ fn random_buffers_fail_only_with_typed_errors() {
       let mut head = wire(&random_frame(&mut r));
       head.truncate(HEADER_SIZE);
       let off = 16 + 4 * r.below(2);
-      let len = if r.below(3) == 0 { u32::MAX } else { r.below(1 << 25) as u32 };
+      let len = if r.below(3) == 0 {
+        u32::MAX
+      } else {
+        r.below(1 << 25) as u32
+      };
       head[off..off + 4].copy_from_slice(&len.to_be_bytes());
       head.extend(data);
       data = head;
@@ -193,7 +202,10 @@ fn write_then_read_returns_the_same_frames() {
     let data: Vec<u8> = want.iter().flat_map(wire).collect();
     let chunky = (it % 2 == 1).then(|| r.next());
     let (got, err) = match chunky {
-      Some(s) => drain(&mut Chunky { data: &data, rng: Rng(s | 1) }),
+      Some(s) => drain(&mut Chunky {
+        data: &data,
+        rng: Rng(s | 1),
+      }),
       None => drain(&mut Cursor::new(&data)),
     };
     assert!(err.is_none(), "iteration {it}: {err:?}");
@@ -203,7 +215,13 @@ fn write_then_read_returns_the_same_frames() {
 
 #[test]
 fn every_prefix_of_a_frame_ends_with_a_typed_result() {
-  let f = Frame { flags: 1, method: 3, request_id: 5, meta: b"abc".to_vec(), payload: b"defgh".to_vec() };
+  let f = Frame {
+    flags: 1,
+    method: 3,
+    request_id: 5,
+    meta: b"abc".to_vec(),
+    payload: b"defgh".to_vec(),
+  };
   let full = wire(&f);
   for n in 0..full.len() {
     let (frames, err) = drain(&mut Cursor::new(&full[..n]));
@@ -224,14 +242,23 @@ fn a_claim_at_the_limit_then_eof_allocates_one_step() {
   MAX_ALLOC.with(|m| m.set(0));
   let (_, err) = drain(&mut Cursor::new(&head));
   let peak = MAX_ALLOC.with(|m| m.get());
-  assert!(matches!(err, Some(Error::Io(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof), "{err:?}");
-  assert!(peak <= 2 * (64 << 10), "largest allocation {peak} bytes for a 1000 byte body");
+  assert!(
+    matches!(err, Some(Error::Io(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof),
+    "{err:?}"
+  );
+  assert!(
+    peak <= 2 * (64 << 10),
+    "largest allocation {peak} bytes for a 1000 byte body"
+  );
 }
 
 #[test]
 fn oversize_sections_are_refused_before_any_byte_is_written() {
   let mut sink = Vec::new();
-  let f = Frame { payload: vec![0; MAX_PAYLOAD_BYTES as usize + 1], ..Frame::default() };
+  let f = Frame {
+    payload: vec![0; MAX_PAYLOAD_BYTES as usize + 1],
+    ..Frame::default()
+  };
   assert!(matches!(frame::write(&mut sink, &f), Err(Error::TooLarge(_))));
   assert!(sink.is_empty());
 }

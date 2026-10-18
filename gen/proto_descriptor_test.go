@@ -39,8 +39,8 @@ func compileProto(t *testing.T, path string) *descriptorpb.FileDescriptorProto {
 	out := filepath.Join(t.TempDir(), "fs.desc")
 	cmd := exec.Command(protoc, "--descriptor_set_out="+out,
 		"--proto_path="+filepath.Dir(path), path)
-	if msg, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("protoc %s: %v\n%s", path, err, msg)
+	if msg, cerr := cmd.CombinedOutput(); cerr != nil {
+		t.Fatalf("protoc %s: %v\n%s", path, cerr, msg)
 	}
 	raw, err := os.ReadFile(out)
 	if err != nil {

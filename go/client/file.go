@@ -89,7 +89,7 @@ func (f *File) Read(p []byte) (int, error) {
 	}
 	n, err := f.readAt(p, f.pos)
 	f.pos += int64(n)
-	if n > 0 && err == io.EOF {
+	if n > 0 && errors.Is(err, io.EOF) {
 		err = nil
 	}
 	return n, err

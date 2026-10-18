@@ -1,0 +1,75 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - unused
+    - ineffassign
+    - bodyclose
+    - errorlint
+    - gosec
+    - gocritic
+    - bidichk
+    - nilnil
+    - nilerr
+    - nilnesserr
+    - gocheckcompilerdirectives
+    - fatcontext
+    - copyloopvar
+    - durationcheck
+    - mirror
+    - unconvert
+    - predeclared
+    - makezero
+    - asciicheck
+    - reassign
+    - wastedassign
+
+  settings:
+    govet:
+      enable:
+        - shadow
+
+    gocritic:
+      enabled-checks:
+        - appendCombine
+        - sloppyReassign
+
+    gosec:
+      excludes:
+        - G115 # Integer conversions are range-checked by the wire codecs.
+
+    errorlint:
+      errorf: true
+      errorf-multi: true
+      asserts: true
+      comparison: true
+
+  exclusions:
+    generated: strict
+    paths:
+      - go/wire
+      - go/client/ops_gen\.go
+    rules:
+      # The generator is a developer tool. Its input paths come from its own flags and
+      # its outputs are source files that must stay world-readable.
+      - path: ^gen/
+        linters:
+          - gosec
+        text: G30[46]
+      # Tests drop Close, Write and Unmarshal errors on fake servers and cleanup paths.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

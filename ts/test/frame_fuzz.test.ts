@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ProtocolError } from "../src/index.js";
 import {
-  encodeFrame, FLAG_RESPONSE, Frame, FrameReader, HEADER_SIZE, MAX_META_BYTES, MAX_PAYLOAD_BYTES,
+  encodeFrame, FLAG_RESPONSE, type Frame, FrameReader, HEADER_SIZE, MAX_META_BYTES, MAX_PAYLOAD_BYTES,
 } from "../src/frame.js";
 
 const SEED = 0x6d667331;
@@ -81,7 +81,7 @@ describe("frame reader fuzz", () => {
       const rd = new FrameReader();
       const { frames, err } = feed(rd, data, r);
       if (err !== undefined) {
-        assert.ok(err instanceof ProtocolError, `iteration ${it}: ${String(err)}`);
+        assert.ok(err instanceof ProtocolError, `iteration ${it}: ${(err as Error).message}`);
         rejected++;
       }
       checkFrames(frames, data.length);
@@ -105,7 +105,7 @@ describe("frame reader fuzz", () => {
         data[below(r, HEADER_SIZE)] = below(r, 256);
       }
       const { frames, err } = feed(new FrameReader(), data, r);
-      if (err !== undefined) assert.ok(err instanceof ProtocolError, `iteration ${it}: ${String(err)}`);
+      if (err !== undefined) assert.ok(err instanceof ProtocolError, `iteration ${it}: ${(err as Error).message}`);
       checkFrames(frames, data.length);
     }
   });

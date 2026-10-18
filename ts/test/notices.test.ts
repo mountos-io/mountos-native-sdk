@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { Client, ClientEvent, MountosError } from "../src/index.js";
+import { Client, type ClientEvent, MountosError } from "../src/index.js";
 import * as pb from "../src/gen/mountos_fs.js";
 import { FakeServer } from "./fake_server.js";
 
@@ -196,8 +196,9 @@ describe("notices", () => {
       kind: NK.NOTICE_KIND_CHANGE, refId: w.id, changeKind: pb.WatchEventKind.WATCH_EVENT_KIND_OVERFLOW,
     });
     const ev = await next;
-    assert.equal(ev.value.kind, "overflow");
-    assert.equal(ev.value.refId, w.id);
+    const val = ev.value as { kind: string; refId: unknown };
+    assert.equal(val.kind, "overflow");
+    assert.equal(val.refId, w.id);
     assert.deepEqual(logs, []);
     await w.close();
   });

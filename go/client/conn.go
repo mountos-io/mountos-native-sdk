@@ -82,7 +82,7 @@ func (s *sock) isDead() bool {
 
 // lostErr is the error for a request on a socket that ended. Call it only after dead is closed.
 func (s *sock) lostErr() error {
-	return &ProtocolError{Op: "read frame", Err: fmt.Errorf("%w: %v", ErrConnLost, s.err)}
+	return &ProtocolError{Op: "read frame", Err: fmt.Errorf("%w: %v", ErrConnLost, s.err)} //nolint:errorlint // The cause stays text so callers cannot match transport errors through it.
 }
 
 // conn is one pooled connection. mu serializes dial and drop. Requests do not
@@ -170,7 +170,7 @@ func (c *conn) drop() {
 	}
 	c.sk = nil
 	sk.closing.Store(true)
-	sk.nc.Close()
+	_ = sk.nc.Close() // Teardown; the reader goroutine ends on the close.
 	<-sk.dead
 }
 
@@ -179,7 +179,7 @@ func (c *conn) drop() {
 func (c *conn) shutdown() {
 	if sk := c.cur.Load(); sk != nil {
 		sk.closing.Store(true)
-		sk.nc.Close()
+		_ = sk.nc.Close() // Teardown; the reader goroutine ends on the close.
 	}
 }
 
@@ -189,7 +189,7 @@ func (c *conn) shutdown() {
 // connection-lost error.
 func (s *sock) fail(err error) {
 	s.setErr(err)
-	s.nc.Close()
+	_ = s.nc.Close() // The socket already failed; err is the reason.
 	<-s.dead
 }
 
@@ -213,7 +213,7 @@ func (c *conn) readLoop(sk *sock) {
 			break
 		}
 	}
-	sk.nc.Close()
+	_ = sk.nc.Close() // The read loop ended; the stored error is the reason.
 	close(sk.dead)
 	if !sk.closing.Load() {
 		c.cl.hub.connLost(sk)
@@ -274,7 +274,7 @@ func (s *sock) releaseLate(method uint16, f frame.Frame) {
 	if req == nil {
 		return
 	}
-	go s.callWait(undo, req, &wire.Empty{}, nil)
+	go func() { _, _ = s.callWait(undo, req, &wire.Empty{}, nil) }() // Best-effort undo of an abandoned request.
 }
 
 // hold takes one in-flight slot, waiting while the socket is at its limit. It
@@ -375,7 +375,7 @@ func (s *sock) send(w *waiter, method uint16, req proto.Message, payload []byte)
 	s.pmu.Unlock()
 	d := s.c.cl.callTimeout
 	if d > 0 {
-		s.nc.SetWriteDeadline(time.Now().Add(d))
+		_ = s.nc.SetWriteDeadline(time.Now().Add(d)) // A failed deadline set surfaces as a write error below.
 	}
 	if err = s.write(frame.Frame{Method: method, RequestID: id, Meta: meta, Payload: payload}); err != nil {
 		s.reclaim(id, w, false, method)

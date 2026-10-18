@@ -96,12 +96,7 @@ impl Client {
   }
 
   /// Like `walk` with a caller-chosen limit on queued directories.
-  pub fn walk_max(
-    &self,
-    path: &str,
-    max_pending: usize,
-    f: impl FnMut(&str, &DirEntry) -> Result<()>,
-  ) -> Result<()> {
+  pub fn walk_max(&self, path: &str, max_pending: usize, f: impl FnMut(&str, &DirEntry) -> Result<()>) -> Result<()> {
     walk_with(|p, n, c| self.ls(p, n, c), path, max_pending, f)
   }
 }

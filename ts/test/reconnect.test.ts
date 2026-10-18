@@ -101,7 +101,7 @@ describe("redial", () => {
     const w2 = await client.watch("/");
     srv.emit(1, "/x");
     const ev = await w2[Symbol.asyncIterator]().next();
-    assert.equal(ev.value.path, "/x");
+    assert.equal((ev.value as { path: string }).path, "/x");
     await w2.close();
   });
 

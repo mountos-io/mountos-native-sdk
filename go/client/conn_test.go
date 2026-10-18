@@ -21,14 +21,14 @@ func TestUnmatchedReplyFailsCall(t *testing.T) {
 	}
 	defer ln.Close()
 	go func() {
-		c, err := ln.Accept()
-		if err != nil {
+		c, aerr := ln.Accept()
+		if aerr != nil {
 			return
 		}
 		defer c.Close()
 		for {
-			f, err := frame.Read(c, limits)
-			if err != nil {
+			f, rerr := frame.Read(c, limits)
+			if rerr != nil {
 				return
 			}
 			out := frame.Frame{Flags: frame.FlagResponse, Method: f.Method, RequestID: f.RequestID}

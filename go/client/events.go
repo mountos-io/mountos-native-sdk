@@ -229,7 +229,7 @@ func (h *hub) notice(sk *sock, f frame.Frame) {
 
 // connLost reports a connection that dropped without the client asking for it.
 func (h *hub) connLost(sk *sock) {
-	h.emit(Event{Kind: EventConnLost, Err: fmt.Errorf("%w: %v", ErrConnLost, sk.err), Time: time.Now(), src: sk})
+	h.emit(Event{Kind: EventConnLost, Err: fmt.Errorf("%w: %v", ErrConnLost, sk.err), Time: time.Now(), src: sk}) //nolint:errorlint // The cause stays text so callers cannot match transport errors through it.
 }
 
 // emit gives ev to the watches at once, from the caller's goroutine, so a slow

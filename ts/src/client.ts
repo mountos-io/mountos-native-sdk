@@ -1,16 +1,16 @@
-import { itemErrors, MAX_BATCH_ITEMS, planPieces, ReadRange, ReadResult, StatResult, WriteItem, WriteResult } from "./bulk.js";
+import { itemErrors, MAX_BATCH_ITEMS, planPieces, type ReadRange, type ReadResult, type StatResult, type WriteItem, type WriteResult } from "./bulk.js";
 import { Conn } from "./conn.js";
 import { DeadlineExceededError, MountosError, ProtocolError, TooManyEntriesError, TransportError } from "./errors.js";
-import { Frame, MAX_PAYLOAD_BYTES } from "./frame.js";
+import { type Frame, MAX_PAYLOAD_BYTES } from "./frame.js";
 import * as pb from "./gen/mountos_fs.js";
 import {
-  dec, DirEntry, enc, FileInfo, FileType, HelloResponse, OpenFlag,
+  dec, type DirEntry, enc, FileType, type HelloResponse, OpenFlag,
   decHello, toDirEntry, toFileInfo,
 } from "./api.js";
 import { ClientOps, FileOps, Method } from "./ops_gen.js";
 import { requireCapability } from "./capability.js";
-import { ClientEvent, decodeNotice, describeEvent, Logger } from "./events.js";
-import { Watch, WatchOptions } from "./watch.js";
+import { type ClientEvent, decodeNotice, describeEvent, type Logger } from "./events.js";
+import { Watch, type WatchOptions } from "./watch.js";
 
 export interface ClientOptions {
   /** Number of connections. Default 4. */
@@ -149,7 +149,7 @@ export class Client extends ClientOps {
     const bad = results.find((r) => r.status === "rejected");
     if (bad) {
       for (const r of ok) r.value.c.close();
-      throw (bad as PromiseRejectedResult).reason;
+      throw (bad).reason;
     }
     const hello = ok[0].value.hello;
     return new Client(ok.map((r) => r.value.c), opts.logger ?? console, socketPath, name, hello, timeout, inflight);
@@ -302,8 +302,8 @@ export class Client extends ClientOps {
   // When the last live connection ends, waiting calls get a redialed one or the dial error.
   private reviveWaiters(): void {
     if (this.connWaiters.length === 0 || this.slots.some((sl) => sl.conn.alive)) return;
-    Promise.any(this.slots.map((sl) => this.redial(sl))).catch((e) => {
-      const err = e instanceof AggregateError ? e.errors[0] : e;
+    Promise.any(this.slots.map((sl) => this.redial(sl))).catch((e: unknown) => {
+      const err = (e instanceof AggregateError ? (e.errors as unknown[])[0] : e) as Error;
       for (const w of this.connWaiters.splice(0)) {
         clearTimeout(w.timer);
         w.reject(err);
@@ -477,6 +477,8 @@ export class Client extends ClientOps {
     const wid = BigInt(id);
     const { signal } = opts;
     if (this.closed) return Promise.reject(new TransportError("client closed"));
+    // An abort reason is caller supplied and may be any value, so it is passed through unchanged.
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
     if (signal?.aborted) return Promise.reject(signal.reason);
     if (this.warmDone.has(wid)) {
       const err = this.warmDone.get(wid);
@@ -488,6 +490,7 @@ export class Client extends ClientOps {
       const onAbort = (): void => {
         set.delete(waiter);
         if (set.size === 0 && this.warmWaiters.get(wid) === set) this.warmWaiters.delete(wid);
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
         reject(signal!.reason);
       };
       const waiter: WarmWaiter = {

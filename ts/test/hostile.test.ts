@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { Client, DeadlineExceededError, MountosError, ProtocolError, TransportError } from "../src/index.js";
-import { FLAG_ERROR, FLAG_NOTIFY, FLAG_RESPONSE, Frame, FrameReader } from "../src/frame.js";
+import { FLAG_ERROR, FLAG_NOTIFY, FLAG_RESPONSE, type Frame, FrameReader } from "../src/frame.js";
 import * as pb from "../src/gen/mountos_fs.js";
 
 const quiet = { warn: (): void => {} };
@@ -200,7 +200,7 @@ describe("hostile server", () => {
         assert.ok(Date.now() - started < 5000, "call took too long");
         if (tc.want) {
           assert.ok(err instanceof Error, "call succeeded against a hostile server");
-          assert.ok(tc.want.some((k) => err instanceof k), `unexpected error ${(err as Error).name}: ${(err as Error).message}`);
+          assert.ok(tc.want.some((k) => err instanceof k), `unexpected error ${(err).name}: ${(err).message}`);
           assert.notEqual(err.message, "");
         }
         let recovered = false;

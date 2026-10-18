@@ -37,8 +37,8 @@ func main() {
 	}
 	if *protoOut != "" {
 		src := genProto(spec, "mountos.filesystem.v1", "github.com/mountos-io/mountos-native-sdk/go/wire;wire")
-		if err := writeOrVerify(*protoOut, []byte(src), *verify); err != nil {
-			fail(fmt.Errorf("write proto %s: %w", *protoOut, err))
+		if werr := writeOrVerify(*protoOut, []byte(src), *verify); werr != nil {
+			fail(fmt.Errorf("write proto %s: %w", *protoOut, werr))
 		}
 	}
 
@@ -54,12 +54,12 @@ func main() {
 		if *outDirs[i] == "" {
 			continue
 		}
-		src, err := e.emit(spec, stubs)
-		if err != nil {
-			fail(fmt.Errorf("%s: %w", e.flag, err))
+		src, eerr := e.emit(spec, stubs)
+		if eerr != nil {
+			fail(fmt.Errorf("%s: %w", e.flag, eerr))
 		}
-		if err := writeOrVerify(filepath.Join(*outDirs[i], e.file), src, *verify); err != nil {
-			fail(fmt.Errorf("%s: %w", e.flag, err))
+		if werr := writeOrVerify(filepath.Join(*outDirs[i], e.file), src, *verify); werr != nil {
+			fail(fmt.Errorf("%s: %w", e.flag, werr))
 		}
 	}
 
@@ -154,7 +154,7 @@ func snapshotOf(s *Spec) *Snapshot {
 func readSnapshot(path string) (*Snapshot, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A missing snapshot is a valid first-run state.
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read snapshot %s: %w", path, err)

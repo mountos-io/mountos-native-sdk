@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { Client, ClientEvent, MountosError, OpenFlag } from "../src/index.js";
+import { Client, type ClientEvent, MountosError, OpenFlag } from "../src/index.js";
 import * as pb from "../src/gen/mountos_fs.js";
 import { BAD_OFFSET, FakeServer } from "./fake_server.js";
 
@@ -347,7 +347,7 @@ describe("watch", () => {
     const pending = w[Symbol.asyncIterator]().next();
     for (let i = 0; i < 5; i++) assert.equal((await client.stat("/n")).size, 3);
     srv.emit(K.WATCH_EVENT_KIND_WRITE, "/d/z");
-    assert.equal((await pending).value.path, "/d/z");
+    assert.equal(((await pending).value as { path: string }).path, "/d/z");
     await w.close();
     assert.equal((await client.stat("/n")).size, 3);
   });

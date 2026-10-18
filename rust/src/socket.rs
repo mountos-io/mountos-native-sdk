@@ -107,7 +107,11 @@ fn sha256(data: &[u8]) -> [u8; 32] {
   for block in msg.chunks_exact(64) {
     let mut w = [0u32; 64];
     for i in 0..16 {
-      w[i] = u32::from_be_bytes(block[i * 4..i * 4 + 4].try_into().unwrap());
+      w[i] = u32::from_be_bytes(
+        block[i * 4..i * 4 + 4]
+          .try_into()
+          .expect("4-byte chunk of a 64-byte block"),
+      );
     }
     for i in 16..64 {
       let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);

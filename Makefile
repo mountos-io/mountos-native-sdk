@@ -1,3 +1,5 @@
+GOBIN_DIR ?= $(HOME)/go/bin
+GO_TOOLS = PATH="$(GOBIN_DIR):$$PATH"
 PROTOC ?= protoc
 PROTOC_GEN_GO ?= $(HOME)/go/bin/protoc-gen-go
 GEN_FLAGS = -spec ../api/filesystem.yaml -client ../api/client.yaml -snapshot ../api/contract-snapshot.json \
@@ -5,10 +7,10 @@ GEN_FLAGS = -spec ../api/filesystem.yaml -client ../api/client.yaml -snapshot ..
 SPEC_FLAGS = -spec ../api/filesystem.yaml -client ../api/client.yaml -snapshot ../api/contract-snapshot.json
 
 .PHONY: all help hooks api-check api-update api-gen gen-test proto-check proto-coherence version-check \
-  check vet test build clean install \
-  ts-install ts-check ts-build ts-test ts-publish ts-clean \
+  check vet test build clean install lint vuln audit \
+  ts-install ts-check ts-lint ts-build ts-test ts-audit ts-publish ts-clean \
   go-check go-build go-test \
-  rust-check rust-build rust-test rust-publish rust-clean \
+  rust-check rust-fmt rust-audit rust-build rust-test rust-publish rust-clean \
   tag tag-minor tag-major bump-version tag-guard
 
 all: check build
@@ -63,6 +65,12 @@ ts-install: ## Install TS dependencies
 ts-check: ts-install ## Type-check TS
 	cd ts && npm run typecheck
 
+ts-lint: ts-install ## Lint TS with ESLint (type-aware rules)
+	cd ts && npm run lint
+
+ts-audit: ts-install ## Audit npm dependencies (fails on known advisories)
+	cd ts && npm audit
+
 ts-build: ts-install ## Build TS
 	cd ts && npm run build
 
@@ -82,6 +90,16 @@ go-check: ## Vet Go code (client module and generator)
 	cd go && go vet ./...
 	cd gen && go vet ./...
 
+lint: ## Run golangci-lint on the Go client module and the generator
+	@$(GO_TOOLS) command -v golangci-lint >/dev/null 2>&1 || { echo "lint: golangci-lint not found in PATH or $(GOBIN_DIR)"; exit 1; }
+	cd go && $(GO_TOOLS) golangci-lint run --config ../.golangci.yml ./...
+	cd gen && $(GO_TOOLS) golangci-lint run --config ../.golangci.yml ./...
+
+vuln: ## Fail when Go code calls a symbol with a known vulnerability (govulncheck)
+	@$(GO_TOOLS) command -v govulncheck >/dev/null 2>&1 || { echo "vuln: govulncheck not found in PATH or $(GOBIN_DIR)"; exit 1; }
+	cd go && $(GO_TOOLS) govulncheck ./...
+	cd gen && $(GO_TOOLS) govulncheck ./...
+
 go-build: ## Build Go code
 	cd go && go build ./...
 	cd gen && go build ./...
@@ -93,6 +111,12 @@ go-test: ## Run Go client tests
 
 rust-check: ## Clippy-lint Rust code (warnings are errors); builds against the committed proto
 	cd rust && cargo clippy --all-targets --locked -- -D warnings
+
+rust-fmt: ## Check Rust formatting (rustfmt.toml)
+	cd rust && cargo fmt --check
+
+rust-audit: ## Audit crate dependencies with cargo audit (skips when not installed)
+	@if cargo audit --version >/dev/null 2>&1; then cd rust && cargo audit; else echo "rust-audit: cargo-audit is not installed, skipping (install: cargo install cargo-audit)"; fi
 
 rust-build: ## Build Rust crate
 	cd rust && cargo build --locked
@@ -110,9 +134,11 @@ rust-clean: ## Remove Rust build artifacts
 
 install: ts-install ## Install all dependencies
 
-vet: go-check rust-check ts-check ## go vet (go, gen), cargo clippy -D warnings, tsc --noEmit
+vet: go-check lint rust-fmt rust-check ts-check ts-lint ## go vet, golangci-lint, cargo fmt --check, clippy -D warnings, tsc --noEmit, eslint
 
-check: vet api-check proto-check proto-coherence version-check ## Vet plus every drift and coherence check
+check: vet vuln api-check proto-check proto-coherence version-check ## Vet, govulncheck, plus every drift and coherence check
+
+audit: ts-audit rust-audit ## Optional dependency audits (npm audit, cargo audit)
 
 test: gen-test go-test ts-test rust-test ## Run every SDK's tests
 

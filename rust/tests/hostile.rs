@@ -65,7 +65,11 @@ fn send_ok(s: &mut UnixStream, f: &Frame, meta: Vec<u8>) {
 }
 
 fn start(act: Act) -> Server {
-  let path = PathBuf::from(format!("/tmp/mn-hostile-{}-{}.sock", std::process::id(), SOCK_SEQ.fetch_add(1, SeqCst)));
+  let path = PathBuf::from(format!(
+    "/tmp/mn-hostile-{}-{}.sock",
+    std::process::id(),
+    SOCK_SEQ.fetch_add(1, SeqCst)
+  ));
   let _ = std::fs::remove_file(&path);
   let l = UnixListener::bind(&path).unwrap();
   let accepted = Arc::new(AtomicUsize::new(0));
@@ -83,7 +87,11 @@ fn start(act: Act) -> Server {
       });
     }
   });
-  Server { path, accepted, finished }
+  Server {
+    path,
+    accepted,
+    finished,
+  }
 }
 
 fn serve(s: &mut UnixStream, hostile: bool, act: Act) {
@@ -180,12 +188,24 @@ fn bad_version(s: &mut UnixStream, f: &Frame) -> bool {
 }
 
 fn claim_over_limit(s: &mut UnixStream, f: &Frame) -> bool {
-  let _ = s.write_all(&header(FLAG_RESPONSE, f.method, f.request_id, 0, frame::MAX_PAYLOAD_BYTES + 1));
+  let _ = s.write_all(&header(
+    FLAG_RESPONSE,
+    f.method,
+    f.request_id,
+    0,
+    frame::MAX_PAYLOAD_BYTES + 1,
+  ));
   false
 }
 
 fn claim_then_stall(s: &mut UnixStream, f: &Frame) -> bool {
-  let _ = s.write_all(&header(FLAG_RESPONSE, f.method, f.request_id, 0, frame::MAX_PAYLOAD_BYTES));
+  let _ = s.write_all(&header(
+    FLAG_RESPONSE,
+    f.method,
+    f.request_id,
+    0,
+    frame::MAX_PAYLOAD_BYTES,
+  ));
   let _ = s.write_all(&[0u8; 1000]);
   false
 }
@@ -236,12 +256,22 @@ fn no_response_flag(s: &mut UnixStream, f: &Frame) -> bool {
 }
 
 fn bad_error_meta(s: &mut UnixStream, f: &Frame) -> bool {
-  let _ = s.write_all(&reply_bytes(FLAG_RESPONSE | FLAG_ERROR, f.method, f.request_id, &[0xff; 5]));
+  let _ = s.write_all(&reply_bytes(
+    FLAG_RESPONSE | FLAG_ERROR,
+    f.method,
+    f.request_id,
+    &[0xff; 5],
+  ));
   false
 }
 
 fn bad_response_meta(s: &mut UnixStream, f: &Frame) -> bool {
-  let _ = s.write_all(&reply_bytes(FLAG_RESPONSE, f.method, f.request_id, &[0x0a, 0xff, 0xff, 0xff, 0x0f]));
+  let _ = s.write_all(&reply_bytes(
+    FLAG_RESPONSE,
+    f.method,
+    f.request_id,
+    &[0x0a, 0xff, 0xff, 0xff, 0x0f],
+  ));
   false
 }
 
@@ -289,39 +319,124 @@ fn silent(_: &mut UnixStream, _: &Frame) -> bool {
 }
 
 fn cases() -> Vec<Case> {
-  let mk = |name, act, call, timeout, want, retries| Case { name, act, call, timeout, want, retries };
+  let mk = |name, act, call, timeout, want, retries| Case {
+    name,
+    act,
+    call,
+    timeout,
+    want,
+    retries,
+  };
   vec![
     mk("garbage bytes", garbage, ping, NO_LIMIT, Want::Protocol, 0),
     mk("bad version", bad_version, ping, NO_LIMIT, Want::Protocol, 0),
-    mk("claim over the limit", claim_over_limit, ping, NO_LIMIT, Want::Protocol, 0),
+    mk(
+      "claim over the limit",
+      claim_over_limit,
+      ping,
+      NO_LIMIT,
+      Want::Protocol,
+      0,
+    ),
     mk("huge claim then stall", claim_then_stall, ping, SHORT, Want::Timeout, 0),
-    mk("huge meta claim then stall", meta_claim_then_stall, ping, SHORT, Want::Timeout, 0),
-    mk("truncated header then close", truncated_header, ping, NO_LIMIT, Want::Io, 0),
+    mk(
+      "huge meta claim then stall",
+      meta_claim_then_stall,
+      ping,
+      SHORT,
+      Want::Timeout,
+      0,
+    ),
+    mk(
+      "truncated header then close",
+      truncated_header,
+      ping,
+      NO_LIMIT,
+      Want::Io,
+      0,
+    ),
     mk("truncated body then close", truncated_body, ping, NO_LIMIT, Want::Io, 0),
     mk("wrong request id", wrong_id, ping, NO_LIMIT, Want::Protocol, 0),
     mk("request id zero", id_zero, ping, NO_LIMIT, Want::Protocol, 0),
     mk("reply twice", reply_twice, ping, NO_LIMIT, Want::Any, 2),
     mk("wrong method id", wrong_method, ping, NO_LIMIT, Want::Protocol, 0),
-    mk("missing response flag", no_response_flag, ping, NO_LIMIT, Want::Protocol, 0),
-    mk("error frame with undecodable meta", bad_error_meta, ping, NO_LIMIT, Want::Protocol, 0),
-    mk("response with undecodable meta", bad_response_meta, |c| c.stat("/x").map(|_| ()), NO_LIMIT, Want::Protocol, 0),
-    mk("stat response without info", empty_ok, |c| c.stat("/x").map(|_| ()), NO_LIMIT, Want::Protocol, 0),
+    mk(
+      "missing response flag",
+      no_response_flag,
+      ping,
+      NO_LIMIT,
+      Want::Protocol,
+      0,
+    ),
+    mk(
+      "error frame with undecodable meta",
+      bad_error_meta,
+      ping,
+      NO_LIMIT,
+      Want::Protocol,
+      0,
+    ),
+    mk(
+      "response with undecodable meta",
+      bad_response_meta,
+      |c| c.stat("/x").map(|_| ()),
+      NO_LIMIT,
+      Want::Protocol,
+      0,
+    ),
+    mk(
+      "stat response without info",
+      empty_ok,
+      |c| c.stat("/x").map(|_| ()),
+      NO_LIMIT,
+      Want::Protocol,
+      0,
+    ),
     mk("notice with unknown kind", unknown_notice, ping, NO_LIMIT, Want::Any, 0),
-    mk("close in StatBatch", close_now, |c| c.stat_batch(&["/a".into(), "/b".into()]).map(|_| ()), NO_LIMIT, Want::Io, 0),
-    mk("close in ReadFile body", close_in_body, |c| c.read_file("/a").map(|_| ()), NO_LIMIT, Want::Io, 0),
+    mk(
+      "close in StatBatch",
+      close_now,
+      |c| c.stat_batch(&["/a".into(), "/b".into()]).map(|_| ()),
+      NO_LIMIT,
+      Want::Io,
+      0,
+    ),
+    mk(
+      "close in ReadFile body",
+      close_in_body,
+      |c| c.read_file("/a").map(|_| ()),
+      NO_LIMIT,
+      Want::Io,
+      0,
+    ),
     mk(
       "close in ReadBatch",
       open_then_close,
       |c| {
         let f = c.open("/a", open_flag::READ_ONLY, 0)?;
-        f.read_batch(&[Range { offset: 0, length: 10 }, Range { offset: 10, length: 10 }]).map(|_| ())
+        f.read_batch(&[Range { offset: 0, length: 10 }, Range { offset: 10, length: 10 }])
+          .map(|_| ())
       },
       NO_LIMIT,
       Want::Io,
       0,
     ),
-    mk("never replies", silent, ping, Duration::from_millis(200), Want::Timeout, 0),
-    mk("never replies to bulk", silent, |c| c.stat_batch(&["/a".into()]).map(|_| ()), Duration::from_millis(200), Want::Timeout, 0),
+    mk(
+      "never replies",
+      silent,
+      ping,
+      Duration::from_millis(200),
+      Want::Timeout,
+      0,
+    ),
+    mk(
+      "never replies to bulk",
+      silent,
+      |c| c.stat_batch(&["/a".into()]).map(|_| ()),
+      Duration::from_millis(200),
+      Want::Timeout,
+      0,
+    ),
   ]
 }
 
@@ -342,7 +457,11 @@ fn hostile_server_cases() {
       assert!(matches_want(tc.want, e), "{}: unexpected error {e:?}", tc.name);
       assert!(!e.to_string().is_empty(), "{}: empty message", tc.name);
     } else {
-      assert!(matches!(tc.want, Want::Any), "{}: call succeeded against a hostile server", tc.name);
+      assert!(
+        matches!(tc.want, Want::Any),
+        "{}: call succeeded against a hostile server",
+        tc.name
+      );
     }
     let mut recovered = false;
     for _ in 0..=tc.retries {
@@ -360,7 +479,12 @@ fn hostile_server_cases() {
     while srv.finished.load(SeqCst) < n && Instant::now() < end {
       std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(srv.finished.load(SeqCst), n, "{}: server connection still open after close", tc.name);
+    assert_eq!(
+      srv.finished.load(SeqCst),
+      n,
+      "{}: server connection still open after close",
+      tc.name
+    );
   }
 }
 

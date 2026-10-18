@@ -439,7 +439,7 @@ func TestWalkDirStopsOnCallbackError(t *testing.T) {
 		}
 		return nil
 	})
-	if err != stop || n != 2 {
+	if !errors.Is(err, stop) || n != 2 {
 		t.Fatalf("err %v after %d entries", err, n)
 	}
 }

@@ -1,6 +1,6 @@
 import net from "node:net";
 import { DeadlineExceededError, ProtocolError, TransportError } from "./errors.js";
-import { encodeFrame, FLAG_ERROR, FLAG_NOTIFY, FLAG_RESPONSE, Frame, FrameReader } from "./frame.js";
+import { encodeFrame, FLAG_ERROR, FLAG_NOTIFY, FLAG_RESPONSE, type Frame, FrameReader } from "./frame.js";
 import { dec, decWireError, enc } from "./api.js";
 import * as pb from "./gen/mountos_fs.js";
 import { Method } from "./ops_gen.js";

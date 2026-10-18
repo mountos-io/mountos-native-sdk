@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -48,7 +49,7 @@ type WriteResult struct {
 // be below n.
 func itemErrors(list []*wire.BatchItemError, n int, op string) (map[int]error, error) {
 	if len(list) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A nil map means no item failed.
 	}
 	m := make(map[int]error, len(list))
 	for _, e := range list {
@@ -156,9 +157,9 @@ type piece struct {
 	src    int // offset into the owner's Data (writes)
 }
 
-// pieces splits items of the given lengths so that no piece exceeds max bytes.
+// pieces splits items of the given lengths so that no piece exceeds limit bytes.
 // A zero-length item still yields one piece so it gets a result.
-func pieces(offsets []int64, lengths []int, max int) []piece {
+func pieces(offsets []int64, lengths []int, limit int) []piece {
 	var out []piece
 	for i, n := range lengths {
 		if n == 0 {
@@ -166,7 +167,7 @@ func pieces(offsets []int64, lengths []int, max int) []piece {
 			continue
 		}
 		for done := 0; done < n; {
-			l := min(max, n-done)
+			l := min(limit, n-done)
 			out = append(out, piece{owner: i, offset: offsets[i] + int64(done), length: l, src: done})
 			done += l
 		}
@@ -174,12 +175,12 @@ func pieces(offsets []int64, lengths []int, max int) []piece {
 	return out
 }
 
-// groups cuts pieces into requests of at most maxBatchItems pieces and max total bytes.
-func groups(ps []piece, max int) [][]piece {
+// groups cuts pieces into requests of at most maxBatchItems pieces and limit total bytes.
+func groups(ps []piece, limit int) [][]piece {
 	var out [][]piece
 	for len(ps) > 0 {
 		n, bytes := 0, 0
-		for n < len(ps) && n < maxBatchItems && bytes+ps[n].length <= max {
+		for n < len(ps) && n < maxBatchItems && bytes+ps[n].length <= limit {
 			bytes += ps[n].length
 			n++
 		}
@@ -244,7 +245,7 @@ func (f *File) fanout(groupCount int) []*File {
 			return
 		}
 		if si, err := sf.fstat(); err != nil || si.GetInode() != info.GetInode() {
-			sf.Close()
+			_ = sf.Close() // The handle is discarded; a close error changes nothing.
 			return
 		}
 		files = append(files, sf)
@@ -349,7 +350,7 @@ func (f *File) ReadBatch(ranges []Range) ([]ReadResult, error) {
 		outs[gi] = readGroup{counts: r.GetCounts(), data: data, errs: errs}
 		return nil
 	})
-	release(files)
+	_ = release(files) // The read result is final; a close error on read-only handles changes nothing.
 	if err != nil {
 		return nil, err
 	}
@@ -489,12 +490,12 @@ func (cl *Client) ReadFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // Read-only handle; a close error changes nothing.
 	buf := make([]byte, limit)
 	for {
 		n, err := f.ReadAt(buf, int64(len(data)))
 		data = append(data, buf[:n]...)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return data, nil
 		}
 		if err != nil {
@@ -516,7 +517,7 @@ func (cl *Client) WriteFile(path string, data []byte, truncate bool) error {
 	}
 	if len(data) <= sk.maxData {
 		var r wire.WriteFileResponse
-		_, err := sk.call(mWriteFile, &wire.WriteFileRequest{Path: path, Truncate: truncate}, &r, data)
+		_, err = sk.call(mWriteFile, &wire.WriteFileRequest{Path: path, Truncate: truncate}, &r, data)
 		sk.release()
 		if err != nil {
 			return err

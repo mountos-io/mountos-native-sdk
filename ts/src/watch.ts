@@ -1,8 +1,8 @@
-import { Conn } from "./conn.js";
+import { type Conn } from "./conn.js";
 import { MountosError, TransportError } from "./errors.js";
 import * as pb from "./gen/mountos_fs.js";
 import { enc } from "./api.js";
-import { ClientEvent } from "./events.js";
+import { type ClientEvent } from "./events.js";
 import { Method } from "./ops_gen.js";
 
 export interface WatchOptions {

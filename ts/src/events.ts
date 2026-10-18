@@ -1,4 +1,4 @@
-import { MountosError, ProtocolError } from "./errors.js";
+import { MountosError } from "./errors.js";
 import * as pb from "./gen/mountos_fs.js";
 import { dec } from "./api.js";
 

@@ -4,12 +4,11 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { Client, ClientEvent, DeadlineExceededError, TransportError } from "../src/index.js";
-import { FLAG_RESPONSE, Frame, FrameReader } from "../src/frame.js";
+import { Client, type ClientEvent, DeadlineExceededError, TransportError } from "../src/index.js";
+import { FLAG_RESPONSE, type Frame, FrameReader } from "../src/frame.js";
 import * as pb from "../src/gen/mountos_fs.js";
 
 const quiet = { warn: (): void => {} };
-const PING = 2;
 const OPEN = 10;
 const CLOSE = 11;
 
@@ -255,7 +254,7 @@ describe("pipelining", () => {
     const results = await Promise.allSettled(calls);
     for (const r of results) {
       assert.equal(r.status, "rejected");
-      assert.ok((r as PromiseRejectedResult).reason instanceof TransportError);
+      assert.ok((r).reason instanceof TransportError);
     }
     s.onRequest = (r) => r.ok();
     await c.ping();

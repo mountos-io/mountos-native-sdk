@@ -84,7 +84,7 @@ func Dial(path string, opts Options) (*Client, error) {
 		_, err := c.ensure()
 		c.mu.Unlock()
 		if err != nil {
-			cl.Close()
+			_ = cl.Close() // The dial error is the one to report.
 			return nil, err
 		}
 	}

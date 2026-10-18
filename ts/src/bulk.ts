@@ -1,6 +1,6 @@
 import type { FileInfo } from "./api.js";
 import { MountosError, ProtocolError } from "./errors.js";
-import * as pb from "./gen/mountos_fs.js";
+import type * as pb from "./gen/mountos_fs.js";
 
 /** Most items the server accepts in one batch request. */
 export const MAX_BATCH_ITEMS = 4096;

@@ -1,4 +1,4 @@
-import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
+import { type BinaryReader, type BinaryWriter } from "@bufbuild/protobuf/wire";
 import { MountosError, ProtocolError } from "./errors.js";
 import * as pb from "./gen/mountos_fs.js";
 

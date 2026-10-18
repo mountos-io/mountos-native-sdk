@@ -117,8 +117,8 @@ pub fn read<R: Read>(r: &mut R) -> Result<Option<Frame>> {
   if hdr[4] != VERSION {
     return Err(Error::Protocol(format!("unsupported frame version {}", hdr[4])));
   }
-  let meta_len = u32::from_be_bytes(hdr[16..20].try_into().unwrap());
-  let payload_len = u32::from_be_bytes(hdr[20..24].try_into().unwrap());
+  let meta_len = u32::from_be_bytes(hdr[16..20].try_into().expect("4-byte header field"));
+  let payload_len = u32::from_be_bytes(hdr[20..24].try_into().expect("4-byte header field"));
   if meta_len > MAX_META_BYTES {
     return Err(Error::Protocol(format!("meta {meta_len} > {MAX_META_BYTES}")));
   }
@@ -129,8 +129,8 @@ pub fn read<R: Read>(r: &mut R) -> Result<Option<Frame>> {
   let payload = read_section(r, payload_len as usize)?;
   Ok(Some(Frame {
     flags: hdr[5],
-    method: u16::from_be_bytes(hdr[6..8].try_into().unwrap()),
-    request_id: u64::from_be_bytes(hdr[8..16].try_into().unwrap()),
+    method: u16::from_be_bytes(hdr[6..8].try_into().expect("2-byte header field")),
+    request_id: u64::from_be_bytes(hdr[8..16].try_into().expect("8-byte header field")),
     meta,
     payload,
   }))
