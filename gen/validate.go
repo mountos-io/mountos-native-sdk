@@ -96,9 +96,9 @@ func validate(s *Spec) []error {
 			add("%s: capability %q not declared in capabilities", where, op.Capability)
 		}
 		for _, sh := range []struct {
-			label string
 			shape Shape
-		}{{"request", op.Request}, {"response", op.Response}} {
+			label string
+		}{{op.Request, "request"}, {op.Response, "response"}} {
 			errs = append(errs, checkShape(where+" "+sh.label, sh.shape, msgNames, enumNames)...)
 		}
 		for _, e := range op.Errors {

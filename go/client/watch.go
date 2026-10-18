@@ -14,15 +14,15 @@ const watchBuffer = 256
 // Watch call, and ends when that connection closes. Events is a filtered
 // view of the client events for this watch.
 type Watch struct {
-	cl *Client
-	sk *sock
-	ch chan Event
+	cl    *Client
+	sk    *sock
+	ch    chan Event
+	early []Event // events that arrived before the Watch call returned
 
-	mu      sync.Mutex
 	id      uint64
-	known   bool    // id is set. Before that, events of the connection wait in early.
-	early   []Event // events that arrived before the Watch call returned
-	dropped bool    // an event was dropped and no OVERFLOW went out yet
+	mu      sync.Mutex
+	known   bool // id is set. Before that, events of the connection wait in early.
+	dropped bool // an event was dropped and no OVERFLOW went out yet
 	closed  bool
 }
 

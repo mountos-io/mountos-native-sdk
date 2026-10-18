@@ -85,14 +85,14 @@ func TestReadRejects(t *testing.T) {
 	tooBigMeta[16], tooBigMeta[17], tooBigMeta[18], tooBigMeta[19] = 0xFF, 0xFF, 0xFF, 0xFF
 
 	cases := map[string]struct {
-		in   []byte
 		want error
+		in   []byte
 	}{
-		"bad magic":        {badMagic, ErrBadMagic},
-		"bad version":      {badVersion, ErrUnsupportedVersion},
-		"meta over limit":  {tooBigMeta, ErrTooLarge},
-		"truncated header": {good[:10], io.ErrUnexpectedEOF},
-		"truncated body":   {good[:HeaderSize], io.ErrUnexpectedEOF},
+		"bad magic":        {ErrBadMagic, badMagic},
+		"bad version":      {ErrUnsupportedVersion, badVersion},
+		"meta over limit":  {ErrTooLarge, tooBigMeta},
+		"truncated header": {io.ErrUnexpectedEOF, good[:10]},
+		"truncated body":   {io.ErrUnexpectedEOF, good[:HeaderSize]},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

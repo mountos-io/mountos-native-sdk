@@ -20,17 +20,17 @@ import (
 // fuzzReply is what the decode fuzz server answers to every method except
 // Hello, Open and Opendir.
 type fuzzReply struct {
-	flags   uint8
 	meta    []byte
 	payload []byte
 	notice  []byte // sent as a notice frame before the reply when non-nil
+	flags   uint8
 }
 
 // fuzzServer answers each request with the current fuzzReply.
 type fuzzServer struct {
-	path  string
 	ln    net.Listener
 	reply atomic.Pointer[fuzzReply]
+	path  string
 	wg    sync.WaitGroup
 }
 
@@ -89,6 +89,8 @@ func (s *fuzzServer) serve(c net.Conn) {
 }
 
 // fuzzOps runs one client operation against files opened for this execution.
+//
+//nolint:govet // fieldalignment: the rows are positional and read best with the name first.
 var fuzzOps = []struct {
 	name string
 	run  func(cl *Client, f *File, d *Dir) error
@@ -107,7 +109,10 @@ var fuzzOps = []struct {
 	{"Utimens", func(cl *Client, _ *File, _ *Dir) error { n := time.Unix(1, 0); return cl.Utimens("/a", &n, &n) }},
 	{"Ls", func(cl *Client, _ *File, _ *Dir) error { _, _, err := cl.Ls("/d", 100, ""); return err }},
 	{"ReadDirAll", func(cl *Client, _ *File, _ *Dir) error { _, err := cl.ReadDirAll("/d"); return err }},
-	{"StatBatch", func(cl *Client, _ *File, _ *Dir) error { _, err := cl.StatBatch([]string{"/a", "/b", "/c"}); return err }},
+	{"StatBatch", func(cl *Client, _ *File, _ *Dir) error {
+		_, err := cl.StatBatch([]string{"/a", "/b", "/c"})
+		return err
+	}},
 	{"ReadFile", func(cl *Client, _ *File, _ *Dir) error { _, err := cl.ReadFile("/a"); return err }},
 	{"WriteFile", func(cl *Client, _ *File, _ *Dir) error { return cl.WriteFile("/a", []byte("data"), true) }},
 	{"ReadAt", func(_ *Client, f *File, _ *Dir) error {
@@ -152,7 +157,7 @@ var fuzzOps = []struct {
 		return err
 	}},
 	{"WriteBatch", func(_ *Client, f *File, _ *Dir) error {
-		rs, err := f.WriteBatch([]WriteItem{{0, []byte("abcd")}, {10, []byte("ef")}})
+		rs, err := f.WriteBatch([]WriteItem{{Offset: 0, Data: []byte("abcd")}, {Offset: 10, Data: []byte("ef")}})
 		if err == nil {
 			if len(rs) != 2 {
 				return errors.New("fuzz oracle: WriteBatch result count")

@@ -123,12 +123,12 @@ func rawHeader(flags uint8, method uint16, id uint64, metaLen, payloadLen uint32
 
 // hostileCase is one misbehavior and the client call that meets it.
 type hostileCase struct {
-	name    string
-	act     act
-	call    func(cl *Client) error
-	timeout time.Duration // Options.CallTimeout
+	act  act
+	call func(cl *Client) error
 	// wantErr checks the typed error. A nil wantErr means the call may succeed or fail.
 	wantErr func(err error) bool
+	name    string
+	timeout time.Duration // Options.CallTimeout
 	// retries is how many calls after the hostile one may fail before the client works again.
 	retries int
 }

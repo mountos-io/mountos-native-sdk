@@ -107,6 +107,10 @@ func joinLines(lines []string) string {
 
 // Snapshot is the reviewed, committed view of the contract. It holds resolved
 // shapes so a diff never depends on YAML formatting.
+//
+// The JSON field order is the byte layout of the committed snapshot.
+//
+//nolint:govet // fieldalignment: reordering would change the snapshot bytes.
 type Snapshot struct {
 	Version      int                         `json:"version"`
 	MinorVersion int                         `json:"minorVersion"`
@@ -117,6 +121,9 @@ type Snapshot struct {
 	ErrorCodes   map[string]int              `json:"errorCodes"`
 }
 
+// The JSON field order is the byte layout of the committed snapshot.
+//
+//nolint:govet // fieldalignment: reordering would change the snapshot bytes.
 type SnapOp struct {
 	Name       string   `json:"name"`
 	Kind       string   `json:"kind"`

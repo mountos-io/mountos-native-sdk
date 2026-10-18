@@ -36,6 +36,7 @@ linters:
     govet:
       enable:
         - shadow
+        - fieldalignment
 
     gocritic:
       enabled-checks:

@@ -1,5 +1,6 @@
 GOBIN_DIR ?= $(HOME)/go/bin
 GO_TOOLS = PATH="$(GOBIN_DIR):$$PATH"
+CARGO_BIN_DIR ?= $(HOME)/.cargo/bin
 PROTOC ?= protoc
 PROTOC_GEN_GO ?= $(HOME)/go/bin/protoc-gen-go
 GEN_FLAGS = -spec ../api/filesystem.yaml -client ../api/client.yaml -snapshot ../api/contract-snapshot.json \
@@ -68,8 +69,8 @@ ts-check: ts-install ## Type-check TS
 ts-lint: ts-install ## Lint TS with ESLint (type-aware rules)
 	cd ts && npm run lint
 
-ts-audit: ts-install ## Audit npm dependencies (fails on known advisories)
-	cd ts && npm audit
+ts-audit: ts-install ## Audit runtime npm dependencies (needs network, fails on known advisories)
+	cd ts && npm audit --omit=dev
 
 ts-build: ts-install ## Build TS
 	cd ts && npm run build
@@ -115,8 +116,8 @@ rust-check: ## Clippy-lint Rust code (warnings are errors); builds against the c
 rust-fmt: ## Check Rust formatting (rustfmt.toml)
 	cd rust && cargo fmt --check
 
-rust-audit: ## Audit crate dependencies with cargo audit (skips when not installed)
-	@if cargo audit --version >/dev/null 2>&1; then cd rust && cargo audit; else echo "rust-audit: cargo-audit is not installed, skipping (install: cargo install cargo-audit)"; fi
+rust-audit: ## Audit crate dependencies with cargo audit (fails on advisories, skips when not installed)
+	@if PATH="$(CARGO_BIN_DIR):$$PATH" cargo audit --version >/dev/null 2>&1; then cd rust && PATH="$(CARGO_BIN_DIR):$$PATH" cargo audit --deny warnings; else echo "rust-audit: cargo-audit is not installed, skipping (install: cargo install cargo-audit)"; fi
 
 rust-build: ## Build Rust crate
 	cd rust && cargo build --locked
@@ -136,9 +137,9 @@ install: ts-install ## Install all dependencies
 
 vet: go-check lint rust-fmt rust-check ts-check ts-lint ## go vet, golangci-lint, cargo fmt --check, clippy -D warnings, tsc --noEmit, eslint
 
-check: vet vuln api-check proto-check proto-coherence version-check ## Vet, govulncheck, plus every drift and coherence check
+check: vet vuln rust-audit api-check proto-check proto-coherence version-check ## Vet, govulncheck, cargo audit, plus every drift and coherence check
 
-audit: ts-audit rust-audit ## Optional dependency audits (npm audit, cargo audit)
+audit: ts-audit rust-audit ## Dependency audits (npm audit needs network, cargo audit also runs in check)
 
 test: gen-test go-test ts-test rust-test ## Run every SDK's tests
 

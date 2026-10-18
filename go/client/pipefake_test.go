@@ -19,32 +19,30 @@ import (
 // Stat (size is the path length), Open, Fstat, ReadAt (count bytes of zeros,
 // at most 4096) and Close.
 type pipeServer struct {
-	t    testing.TB
-	ln   net.Listener
-	path string
-	wg   sync.WaitGroup
-
-	advertise   bool   // report the pipelining capability in Hello
+	ln          net.Listener
+	t           testing.TB
+	perConn     map[int]int   // requests received per connection
+	quit        chan struct{} // closed by close, releases requests that never get a reply
+	out         map[int]int   // requests received and not yet answered, per connection
+	gateOpen    chan struct{}
+	hang        map[string]bool // paths that never get a reply
+	slow        map[string]time.Duration
+	path        string
+	undone      []string // "close:N", "closedir:N", "unwatch:N" received
+	conns       []net.Conn
+	wg          sync.WaitGroup
+	peakAll     int           // most requests outstanding at once on all connections
+	seen        int           // requests received, not counting Hello
+	slowMake    time.Duration // pause before Open, Opendir and Watch reply
+	gateN       int           // Stat and ReadAt wait until gateN of them arrived
+	gateSeen    int
+	peak        int // most requests outstanding at once on one connection
+	nextH       uint64
+	quitOnce    sync.Once
+	mu          sync.Mutex
 	maxInflight uint32 // max_inflight in Hello
-
-	mu       sync.Mutex
-	conns    []net.Conn
-	out      map[int]int // requests received and not yet answered, per connection
-	peak     int         // most requests outstanding at once on one connection
-	peakAll  int         // most requests outstanding at once on all connections
-	seen     int         // requests received, not counting Hello
-	perConn  map[int]int // requests received per connection
-	slow     map[string]time.Duration
-	hang     map[string]bool // paths that never get a reply
-	gateN    int             // Stat and ReadAt wait until gateN of them arrived
-	gateSeen int
-	gateOpen chan struct{}
-	reverse  bool // after the gate, the last arrival answers first
-	nextH    uint64
-	slowMake time.Duration // pause before Open, Opendir and Watch reply
-	undone   []string      // "close:N", "closedir:N", "unwatch:N" received
-	quit     chan struct{} // closed by close, releases requests that never get a reply
-	quitOnce sync.Once
+	reverse     bool   // after the gate, the last arrival answers first
+	advertise   bool   // report the pipelining capability in Hello
 }
 
 func newPipeServer(t testing.TB, advertise bool, maxInflight uint32) *pipeServer {

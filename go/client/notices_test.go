@@ -27,15 +27,15 @@ type unwatchRec struct {
 
 // fakeNotify holds warm ids, watch ids and notice state. Callers hold fakeServer.mu.
 type fakeNotify struct {
-	nextWarm   uint64
 	warmConn   map[uint64]int
-	full       bool // WarmOpen and WarmRead answer EAGAIN
-	nextWatch  uint64
 	watchConn  map[uint64]int
 	unwatches  []unwatchRec
+	nextWarm   uint64
+	nextWatch  uint64
 	seq        uint64
-	eager      int // CHANGE notices sent right after a Watch reply
-	pingNotice int // notices sent before every Ping reply
+	eager      int  // CHANGE notices sent right after a Watch reply
+	pingNotice int  // notices sent before every Ping reply
+	full       bool // WarmOpen and WarmRead answer EAGAIN
 }
 
 // handleNotify serves the warm, Watch and Unwatch methods. ok is false for other methods.
@@ -166,8 +166,8 @@ func (s *fakeServer) unwatchLog() []unwatchRec {
 
 // bufLogger captures log lines.
 type bufLogger struct {
-	mu sync.Mutex
 	b  bytes.Buffer
+	mu sync.Mutex
 }
 
 func (l *bufLogger) Printf(format string, args ...any) {

@@ -24,7 +24,10 @@ const DefaultMaxInflight = 32
 
 // Options configures a Client.
 type Options struct {
-	PoolSize int // connections to open, DefaultPoolSize when 0
+	// Logger receives diagnostic lines: events that no listener took, dropped
+	// events, and listener panics. Pass your own, for example a *log.Logger.
+	// When nil, lines go to os.Stderr with the prefix "mountos: ".
+	Logger Logger
 
 	// MaxInflight is the most requests kept outstanding on one connection,
 	// DefaultMaxInflight when 0. The limit in force is the lower of this and
@@ -40,26 +43,23 @@ type Options struct {
 	// frame.
 	CallTimeout time.Duration
 
-	// Logger receives diagnostic lines: events that no listener took, dropped
-	// events, and listener panics. Pass your own, for example a *log.Logger.
-	// When nil, lines go to os.Stderr with the prefix "mountos: ".
-	Logger Logger
+	PoolSize int // connections to open, DefaultPoolSize when 0
 }
 
 // Client holds a pool of connections to one API socket. It is safe for concurrent use.
 type Client struct {
-	path        string
 	hub         *hub
+	free        chan struct{}                       // a token per released slot, wakes acquire
+	caps        atomic.Pointer[map[string]struct{}] // capabilities the server reported. nil or empty means all.
+	closedCh    chan struct{}
+	path        string
 	conns       []*conn
 	next        atomic.Uint64
-	free        chan struct{} // a token per released slot, wakes acquire
 	maxInflight int
 	callTimeout time.Duration
-	caps        atomic.Pointer[map[string]struct{}] // capabilities the server reported. nil or empty means all.
+	closeOnce   sync.Once
 	mu          sync.Mutex
 	closed      bool
-	closedCh    chan struct{}
-	closeOnce   sync.Once
 }
 
 // Dial connects to the unix socket at path. It opens every pooled connection

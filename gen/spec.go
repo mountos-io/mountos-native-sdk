@@ -8,6 +8,10 @@ import (
 )
 
 // Field is one message field. ID is the permanent wire field number.
+//
+// The JSON field order is the byte layout of the committed contract snapshot.
+//
+//nolint:govet // fieldalignment: reordering would change the snapshot bytes.
 type Field struct {
 	ID       int    `yaml:"id" json:"id"`
 	Type     string `yaml:"type" json:"type"`
@@ -16,8 +20,8 @@ type Field struct {
 
 // Shape is a request or response: either a named message or an inline field set.
 type Shape struct {
-	Ref    string           `json:"ref,omitempty"`
 	Fields map[string]Field `json:"fields,omitempty"`
+	Ref    string           `json:"ref,omitempty"`
 }
 
 func (s *Shape) UnmarshalYAML(n *yaml.Node) error {
@@ -33,29 +37,29 @@ type Enum struct {
 }
 
 type Operation struct {
-	Name       string   `yaml:"name"`
-	ID         int      `yaml:"id"`
-	Kind       string   `yaml:"kind"`
 	Request    Shape    `yaml:"request"`
 	Response   Shape    `yaml:"response"`
-	Errors     []string `yaml:"errors"`
+	Name       string   `yaml:"name"`
+	Kind       string   `yaml:"kind"`
 	Capability string   `yaml:"capability"`
+	Errors     []string `yaml:"errors"`
+	ID         int      `yaml:"id"`
 }
 
 type ErrorCode struct {
-	Code int    `yaml:"code"`
 	Name string `yaml:"name"`
+	Code int    `yaml:"code"`
 }
 
 type Spec struct {
-	API          string                      `yaml:"api"`
-	Version      int                         `yaml:"version"`
-	MinorVersion int                         `yaml:"minorVersion"`
-	Capabilities []string                    `yaml:"capabilities"`
 	Enums        map[string]Enum             `yaml:"enums"`
 	Messages     map[string]map[string]Field `yaml:"messages"`
+	API          string                      `yaml:"api"`
+	Capabilities []string                    `yaml:"capabilities"`
 	Operations   []Operation                 `yaml:"operations"`
 	ErrorCodes   []ErrorCode                 `yaml:"errorCodes"`
+	Version      int                         `yaml:"version"`
+	MinorVersion int                         `yaml:"minorVersion"`
 }
 
 func loadSpec(path string) (*Spec, error) {

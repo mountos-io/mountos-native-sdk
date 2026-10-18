@@ -14,15 +14,15 @@ import (
 // are serialized. Calls on different Files run in parallel, on one connection
 // when the server allows several requests in flight.
 type File struct {
-	cl     *Client
-	sk     *sock
-	max    int // payload bytes per frame
-	handle uint64
-	path   string        // as opened, for parallel batches
-	flags  wire.OpenFlag // as opened
+	cl   *Client
+	sk   *sock
+	path string // as opened, for parallel batches
+	max  int    // payload bytes per frame
 
-	mu     sync.Mutex
+	handle uint64
 	pos    int64
+	mu     sync.Mutex
+	flags  wire.OpenFlag // as opened
 	closed bool
 }
 

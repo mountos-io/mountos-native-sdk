@@ -31,11 +31,11 @@ const (
 
 // Frame is one decoded message.
 type Frame struct {
-	Flags     uint8
-	Method    uint16
-	RequestID uint64
 	Meta      []byte
 	Payload   []byte
+	RequestID uint64
+	Method    uint16
+	Flags     uint8
 }
 
 // Limits bounds frame sizes. A reader rejects frames over these before it

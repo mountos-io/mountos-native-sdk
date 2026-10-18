@@ -183,18 +183,18 @@ func TestAbandonedOverflowRedials(t *testing.T) {
 func TestInflightLimit(t *testing.T) {
 	cases := []struct {
 		name         string
-		advertise    bool
-		serverMax    uint32
 		optMax       int
 		wantPeak     int
+		serverMax    uint32
+		advertise    bool
 		wantAtLeast2 bool
 	}{
-		{"no capability", false, 8, 0, 1, false},
-		{"max_inflight 1", true, 1, 0, 1, false},
-		{"max_inflight 0", true, 0, 0, 1, false},
-		{"client limit 1", true, 8, 1, 1, false},
-		{"client limit 3", true, 8, 3, 3, true},
-		{"server limit 2", true, 2, 0, 2, true},
+		{"no capability", 0, 1, 8, false, false},
+		{"max_inflight 1", 0, 1, 1, true, false},
+		{"max_inflight 0", 0, 1, 0, true, false},
+		{"client limit 1", 1, 1, 8, true, false},
+		{"client limit 3", 3, 3, 8, true, true},
+		{"server limit 2", 0, 2, 2, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

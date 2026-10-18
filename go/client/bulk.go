@@ -29,20 +29,20 @@ type Range struct {
 // ReadResult is the outcome for one Range. Data is shorter than the range
 // length when the range reaches past end of file.
 type ReadResult struct {
-	Data []byte
 	Err  error
+	Data []byte
 }
 
 // WriteItem is data to write at Offset for WriteBatch.
 type WriteItem struct {
-	Offset int64
 	Data   []byte
+	Offset int64
 }
 
 // WriteResult is the outcome for one WriteItem. N is the number of bytes written.
 type WriteResult struct {
-	N   int
 	Err error
+	N   int
 }
 
 // itemErrors maps the batch error list to errors by position. Every index must
@@ -291,9 +291,9 @@ var fanoutMinBytes = 256 << 10
 
 // readGroup is the checked reply to one ReadBatch request.
 type readGroup struct {
+	errs   map[int]error
 	counts []uint32
 	data   []byte
-	errs   map[int]error
 }
 
 // ReadBatch reads several ranges of the file in as few requests as the server
@@ -384,8 +384,8 @@ func (f *File) ReadBatch(ranges []Range) ([]ReadResult, error) {
 
 // writeGroup is the checked reply to one WriteBatch request.
 type writeGroup struct {
-	counts []uint32
 	errs   map[int]error
+	counts []uint32
 }
 
 // WriteBatch writes several items in as few requests as the server limits

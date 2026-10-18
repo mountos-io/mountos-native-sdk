@@ -42,8 +42,8 @@ var errnoByName = map[string]syscall.Errno{
 
 // DialError reports a failure to connect or to complete the Hello handshake.
 type DialError struct {
-	Path string
 	Err  error
+	Path string
 }
 
 func (e *DialError) Error() string { return fmt.Sprintf("mountos: dial %s: %v", e.Path, e.Err) }
@@ -51,8 +51,8 @@ func (e *DialError) Unwrap() error { return e.Err }
 
 // ProtocolError reports a malformed or unexpected frame, or a broken connection.
 type ProtocolError struct {
-	Op  string
 	Err error
+	Op  string
 
 	unsent bool // raised before any byte was written, so the socket is still in sync
 }

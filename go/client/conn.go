@@ -44,28 +44,32 @@ var waiterPool = sync.Pool{New: func() any { return &waiter{ch: make(chan frame.
 // dead is closed when the reader exits, for any reason. err is set before dead
 // is closed.
 type sock struct {
-	c       *conn
-	nc      net.Conn
-	closing atomic.Bool // set when this side closes the socket on purpose
-	dead    chan struct{}
-	errOnce sync.Once
-	err     error
+	nc   net.Conn
+	err  error
+	dead chan struct{}
+	c    *conn
 
-	// Set once before ready becomes true. Read only after ready.
-	ready      atomic.Bool
-	limit      int           // requests outstanding at once
-	maxData    int           // largest payload per frame, from Hello
-	abandonCap int           // abandoned ids kept before the socket is dropped
-	slots      chan struct{} // a token per outstanding request, capacity limit
+	slots chan struct{} // a token per outstanding request, capacity limit
 
-	pmu       sync.Mutex // guards pend, abandoned, nextID
-	pend      map[uint64]*waiter
+	// Guarded by pmu: pend, abandoned, nextID.
 	abandoned map[uint64]uint16 // timed out ids and their methods. A late reply is discarded.
-	nextID    uint64
+	pend      map[uint64]*waiter
 
-	wmu  sync.Mutex // serializes request writes and guards wbuf and mbuf
-	wbuf []byte     // reused encode buffer for small frames
-	mbuf []byte     // reused request metadata buffer
+	// Guarded by wmu: wbuf, mbuf.
+	mbuf []byte // reused request metadata buffer
+	wbuf []byte // reused encode buffer for small frames
+
+	// slots, maxData, abandonCap and limit are set once before ready becomes
+	// true. Read them only after ready.
+	maxData    int // largest payload per frame, from Hello
+	abandonCap int // abandoned ids kept before the socket is dropped
+	limit      int // requests outstanding at once
+	nextID     uint64
+	errOnce    sync.Once
+	pmu        sync.Mutex
+	wmu        sync.Mutex // serializes request writes
+	ready      atomic.Bool
+	closing    atomic.Bool // set when this side closes the socket on purpose
 }
 
 // setErr records why the socket ended. The first reason wins.
@@ -90,11 +94,11 @@ func (s *sock) lostErr() error {
 // broken conn is redialed by the next caller. Files opened on the old socket
 // fail cleanly because that socket is dead.
 type conn struct {
-	mu   sync.Mutex
 	cl   *Client
-	path string
 	sk   *sock // nil when not dialed. Changed under mu.
 	cur  atomic.Pointer[sock]
+	path string
+	mu   sync.Mutex
 }
 
 // session returns the live socket, dialing first when there is none.

@@ -12,12 +12,12 @@ import (
 // ClientOp is one entry of api/client.yaml. It shapes how an operation appears
 // in the SDKs without changing the wire contract.
 type ClientOp struct {
-	Scope  string `yaml:"scope"`
-	Name   string `yaml:"name"`
-	Doc    string `yaml:"doc"`
-	Result string `yaml:"result"`
 	// Defaults gives integer parameters a default value, keyed by wire field name.
 	Defaults map[string]int64 `yaml:"defaults"`
+	Scope    string           `yaml:"scope"`
+	Name     string           `yaml:"name"`
+	Doc      string           `yaml:"doc"`
+	Result   string           `yaml:"result"`
 	Custom   bool             `yaml:"custom"`
 	Planned  bool             `yaml:"planned"`
 }
@@ -41,24 +41,24 @@ func loadClientSpec(path string) (*ClientSpec, error) {
 // StubField is one request or response field in wire order.
 type StubField struct {
 	Name string // snake_case wire name
-	ID   int
 	Type string // spec type
+	ID   int
 }
 
 // Stub is one operation resolved for code generation. Emit is false for custom
 // and planned operations, which keep their hand-written code or have none yet.
 type Stub struct {
-	Op     Operation
-	Name   string // public method name
-	Scope  string // client, file, or dir
-	Doc    string
-	Result string // result struct name when the response has several fields
 	// Defaults maps a parameter's wire name to its default value.
 	Defaults map[string]int64
+	Name     string // public method name
+	Scope    string // client, file, or dir
+	Doc      string
+	Result   string // result struct name when the response has several fields
 	ReqMsg   string // wire message name for the request
 	RespMsg  string // wire message name for the response
 	Params   []StubField
 	Returns  []StubField
+	Op       Operation
 	Emit     bool
 }
 

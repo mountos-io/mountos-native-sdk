@@ -84,16 +84,16 @@ func (k ChangeKind) String() string {
 
 // Event is one server notice or local connection event.
 type Event struct {
+	Time    time.Time
+	Err     error // *WireError for EventWarmFailed, a plain error for EventConnLost.
+	src     *sock // connection the event came from. nil for events made by the client.
+	Path    string
+	OldPath string
+
 	Kind     EventKind
 	Sequence uint64
-	RefID    uint64 // Warm id or watch id. 0 when it does not apply.
-	Path     string
-	OldPath  string
+	RefID    uint64     // Warm id or watch id. 0 when it does not apply.
 	Change   ChangeKind // Set for EventChange.
-	Err      error      // *WireError for EventWarmFailed, a plain error for EventConnLost.
-	Time     time.Time
-
-	src *sock // connection the event came from. nil for events made by the client.
 }
 
 const (
@@ -103,8 +103,8 @@ const (
 )
 
 type listener struct {
-	id uint64
 	fn func(Event)
+	id uint64
 }
 
 type warmResult struct{ err error }
@@ -114,24 +114,29 @@ type warmResult struct{ err error }
 type hub struct {
 	log Logger
 
-	lmu       sync.Mutex // guards listeners and watches
-	listeners []listener
-	nextLID   uint64
-	watches   map[*Watch]struct{}
+	wake chan struct{}
+	stop chan struct{}
+	done chan struct{}
 
-	inCall  atomic.Bool // a listener is running, possibly the caller of shutdown
-	qmu     sync.Mutex  // guards q, dropped, stopped
-	q       []Event
-	dropped int
-	stopped bool
-	wake    chan struct{}
-	stop    chan struct{}
-	done    chan struct{}
-
-	wmu     sync.Mutex // guards the warm cache and waiters
-	warmed  map[uint64]warmResult
-	order   []uint64 // ids in cache, oldest first
+	// Guarded by wmu: warmed, waiters, order.
 	waiters map[uint64][]chan error
+	warmed  map[uint64]warmResult
+
+	// Guarded by lmu: watches, listeners, nextLID.
+	watches   map[*Watch]struct{}
+	listeners []listener
+
+	// Guarded by qmu: q, dropped, stopped.
+	q []Event
+
+	order   []uint64 // warm ids in cache, oldest first
+	dropped int
+	nextLID uint64
+	qmu     sync.Mutex
+	lmu     sync.Mutex
+	wmu     sync.Mutex
+	inCall  atomic.Bool // a listener is running, possibly the caller of shutdown
+	stopped bool
 }
 
 func newHub(l Logger) *hub {
@@ -173,7 +178,7 @@ func (cl *Client) AddListener(fn func(Event)) (remove func()) {
 	h.lmu.Lock()
 	h.nextLID++
 	id := h.nextLID
-	h.listeners = append(h.listeners[:len(h.listeners):len(h.listeners)], listener{id, fn})
+	h.listeners = append(h.listeners[:len(h.listeners):len(h.listeners)], listener{id: id, fn: fn})
 	h.lmu.Unlock()
 	var once sync.Once
 	return func() {

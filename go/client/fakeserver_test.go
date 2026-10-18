@@ -18,53 +18,47 @@ import (
 
 // fakeServer speaks the frame protocol over a unix socket with an in-memory file store.
 type fakeServer struct {
-	t          *testing.T
 	ln         net.Listener
-	path       string
-	maxPayload uint32 // advertised in Hello
-	lim        frame.Limits
-
-	mu         sync.Mutex
 	files      map[string][]byte
-	nextHandle uint64
-	handles    map[uint64]hent
-	violations int // handle used on a connection that did not open it
-	conns      []net.Conn
-	maxSeen    int                 // largest request payload
-	writes     int                 // WriteAt frames received
-	links      map[string]string   // symlink path -> target
-	dirs       map[string][]string // directory path -> entry names
-	times      map[string][2]int64 // path -> atime, mtime ns
-	dirPos     map[uint64]int      // Readdir position per dir handle
-	nlink      map[string]uint32
-
-	wmu        sync.Mutex // serializes frame writes, since watch events are pushed
-	connByIdx  map[int]net.Conn
-	statSizes  []int // paths per StatBatch request
-	readSizes  []int // ranges per ReadBatch request
-	writeSizes []int // ranges per WriteBatch request
-
-	nt fakeNotify // warm ids, watch ids and notice state
-
-	caps       []string                 // capabilities answered in Hello
-	helloCaps  []string                 // capabilities the last Hello asked for
-	stall      atomic.Int32             // Ping requests to leave unanswered
+	release    chan struct{}            // barrierN gate: closed when barrierN requests are in flight
 	delays     map[string]time.Duration // Stat delay per path
-	slowSeen   atomic.Int32             // delayed Stat requests received
-	batchDelay time.Duration            // pause inside each batch request
-	inflight   atomic.Int32             // batch requests being served
-	peak       atomic.Int32             // most batch requests served at once
-	noInode    bool                     // Fstat reports no inode
-
-	// When barrierN > 0, ReadAt blocks until barrierN requests are in flight at once.
-	barrierN int
-	arrived  int
-	release  chan struct{}
+	connByIdx  map[int]net.Conn
+	links      map[string]string // symlink path -> target
+	nlink      map[string]uint32
+	handles    map[uint64]hent
+	t          *testing.T
+	dirPos     map[uint64]int      // Readdir position per dir handle
+	times      map[string][2]int64 // path -> atime, mtime ns
+	dirs       map[string][]string // directory path -> entry names
+	path       string
+	helloCaps  []string // capabilities the last Hello asked for
+	writeSizes []int    // ranges per WriteBatch request
+	conns      []net.Conn
+	caps       []string      // capabilities answered in Hello
+	readSizes  []int         // ranges per ReadBatch request
+	statSizes  []int         // paths per StatBatch request
+	nt         fakeNotify    // warm ids, watch ids and notice state
+	violations int           // handle used on a connection that did not open it
+	batchDelay time.Duration // pause inside each batch request
+	writes     int           // WriteAt frames received
+	maxSeen    int           // largest request payload
+	nextHandle uint64
+	arrived    int // requests waiting at the barrier
+	barrierN   int // when > 0, ReadAt blocks until barrierN requests are in flight at once
+	lim        frame.Limits
+	wmu        sync.Mutex   // serializes frame writes, since watch events are pushed
+	mu         sync.Mutex   // guards the file store, handles and counters
+	slowSeen   atomic.Int32 // delayed Stat requests received
+	inflight   atomic.Int32 // batch requests being served
+	peak       atomic.Int32 // most batch requests served at once
+	stall      atomic.Int32 // Ping requests to leave unanswered
+	maxPayload uint32       // advertised in Hello
+	noInode    bool         // Fstat reports no inode
 }
 
 type hent struct {
-	conn int
 	path string
+	conn int
 }
 
 func newFakeServer(t *testing.T, maxPayload uint32) *fakeServer {

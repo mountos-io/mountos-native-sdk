@@ -236,7 +236,7 @@ func TestWriteBatchParallelAcrossConns(t *testing.T) {
 	cl := dial(t, s, 3)
 	f := openRW(t, cl, "/w")
 	a, b, c := pattern(2500, 1), pattern(2500, 50), pattern(1800, 90)
-	res, err := f.WriteBatch([]WriteItem{{0, a}, {2500, b}, {5000, c}})
+	res, err := f.WriteBatch([]WriteItem{{Offset: 0, Data: a}, {Offset: 2500, Data: b}, {Offset: 5000, Data: c}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestWriteBatchOverlapStaysSerial(t *testing.T) {
 	cl := dial(t, s, 3)
 	f := openRW(t, cl, "/ov")
 	first, second := bytes.Repeat([]byte{'a'}, 2500), bytes.Repeat([]byte{'b'}, 1500)
-	if _, err := f.WriteBatch([]WriteItem{{0, first}, {500, second}}); err != nil {
+	if _, err := f.WriteBatch([]WriteItem{{Offset: 0, Data: first}, {Offset: 500, Data: second}}); err != nil {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
@@ -319,7 +319,7 @@ func TestMissingCapabilityFailsLocally(t *testing.T) {
 		"stat batch": func() error { _, err := cl.StatBatch([]string{"/c"}); return err },
 		"read batch": func() error { _, err := f.ReadBatch([]Range{{0, 1}}); return err },
 		"write batch": func() error {
-			_, err := f.WriteBatch([]WriteItem{{0, []byte("y")}})
+			_, err := f.WriteBatch([]WriteItem{{Offset: 0, Data: []byte("y")}})
 			return err
 		},
 		"read file":  func() error { _, err := cl.ReadFile("/c"); return err },
