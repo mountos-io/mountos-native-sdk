@@ -1,6 +1,9 @@
 //! Pool scheduling, call timeout, local size limits, capability checks, parallel bulk calls and
 //! the walk helper, against an in-process fake server whose behavior each test sets.
 
+#[macro_use]
+mod common;
+
 use mountos_native::frame::{self, Frame, FLAG_ERROR, FLAG_RESPONSE};
 use mountos_native::wire::*;
 use mountos_native::{open_flag, Client, Error, FileType, Options, WriteItem};
@@ -70,10 +73,10 @@ fn err(req: &Frame, code: &str) -> Frame {
     FLAG_RESPONSE | FLAG_ERROR,
     req.method,
     req.request_id,
-    WireError {
+    build!(WireError {
       code: code.into(),
       message: "x".into(),
-    }
+    })
     .encode_to_vec(),
     vec![],
   )
@@ -91,12 +94,12 @@ fn serve(mut s: UnixStream, sh: Arc<Shared>, idx: usize, max_payload: u32) {
       method::HELLO => {
         sh.hellos.fetch_add(1, SeqCst);
         Ok(
-          HelloResponse {
+          build!(HelloResponse {
             version: 1,
             capabilities: sh.capabilities.lock().unwrap().clone(),
             max_payload_bytes: max_payload,
             max_inflight: 1,
-          }
+          })
           .encode_to_vec(),
         )
       }
@@ -109,27 +112,24 @@ fn serve(mut s: UnixStream, sh: Arc<Shared>, idx: usize, max_payload: u32) {
           std::thread::sleep(Duration::from_millis(300));
         }
         Ok(
-          StatResponse {
-            info: Some(FileInfo {
-              name: r.path,
-              ..Default::default()
-            }),
-          }
+          build!(StatResponse {
+            info: Some(build!(FileInfo { name: r.path })),
+          })
           .encode_to_vec(),
         )
       }
-      method::PING => Ok(Empty {}.encode_to_vec()),
+      method::PING => Ok(Empty::default().encode_to_vec()),
       method::WRITE_BATCH => {
         let r = WriteBatchRequest::decode(&meta[..]).unwrap();
         let counts = r.ranges.iter().map(|g| g.length).collect();
-        Ok(WriteBatchResponse { counts, errors: vec![] }.encode_to_vec())
+        Ok(build!(WriteBatchResponse { counts, errors: vec![] }).encode_to_vec())
       }
-      method::OPEN => Ok(OpenResponse { handle: 1 }.encode_to_vec()),
+      method::OPEN => Ok(build!(OpenResponse { handle: 1 }).encode_to_vec()),
       method::READ_AT => {
         std::thread::sleep(Duration::from_millis(slow));
         let r = ReadAtRequest::decode(&meta[..]).unwrap();
         payload = vec![7u8; r.length as usize];
-        Ok(ReadAtResponse { count: r.length }.encode_to_vec())
+        Ok(build!(ReadAtResponse { count: r.length }).encode_to_vec())
       }
       method::WRITE_AT => {
         let n = sh.write_calls.fetch_add(1, SeqCst) + 1;
@@ -138,9 +138,9 @@ fn serve(mut s: UnixStream, sh: Arc<Shared>, idx: usize, max_payload: u32) {
           Err("ENOSPC")
         } else {
           Ok(
-            WriteAtResponse {
+            build!(WriteAtResponse {
               count: req.payload.len() as u32,
-            }
+            })
             .encode_to_vec(),
           )
         }
@@ -151,13 +151,14 @@ fn serve(mut s: UnixStream, sh: Arc<Shared>, idx: usize, max_payload: u32) {
         let infos = r
           .paths
           .iter()
-          .map(|p| FileInfo {
-            name: p.clone(),
-            size: p[1..].parse().unwrap(),
-            ..Default::default()
+          .map(|p| {
+            build!(FileInfo {
+              name: p.clone(),
+              size: p[1..].parse().unwrap(),
+            })
           })
           .collect();
-        Ok(StatBatchResponse { infos, errors: vec![] }.encode_to_vec())
+        Ok(build!(StatBatchResponse { infos, errors: vec![] }).encode_to_vec())
       }
       method::LS => {
         let r = LsRequest::decode(&meta[..]).unwrap();
@@ -168,10 +169,12 @@ fn serve(mut s: UnixStream, sh: Arc<Shared>, idx: usize, max_payload: u32) {
           .iter()
           .skip(from)
           .take(r.max_entries as usize)
-          .map(|(n, dir)| DirEntry {
-            name: n.clone(),
-            r#type: if *dir { FileType::Directory } else { FileType::Regular } as i32,
-            info: None,
+          .map(|(n, dir)| {
+            build!(DirEntry {
+              name: n.clone(),
+              r#type: if *dir { FileType::Directory } else { FileType::Regular } as i32,
+              info: None,
+            })
           })
           .collect();
         let end = from + page.len();
@@ -181,15 +184,15 @@ fn serve(mut s: UnixStream, sh: Arc<Shared>, idx: usize, max_payload: u32) {
           String::new()
         };
         Ok(
-          LsResponse {
+          build!(LsResponse {
             entries: page,
             next_cursor,
-          }
+          })
           .encode_to_vec(),
         )
       }
-      method::WARM_OPEN => Ok(WarmOpenResponse { warm_id: 1 }.encode_to_vec()),
-      method::WATCH => Ok(WatchResponse { watch_id: 1 }.encode_to_vec()),
+      method::WARM_OPEN => Ok(build!(WarmOpenResponse { warm_id: 1 }).encode_to_vec()),
+      method::WATCH => Ok(build!(WatchResponse { watch_id: 1 }).encode_to_vec()),
       _ => Err("ENOSYS"),
     };
     sh.inflight.fetch_sub(1, SeqCst);

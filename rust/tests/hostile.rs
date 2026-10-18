@@ -1,6 +1,9 @@
 //! Hostile server tests. After Hello the first connection misbehaves. A call must fail with a
 //! typed error in bounded time, and the client must work again on a healthy connection.
 
+#[macro_use]
+mod common;
+
 use mountos_native::frame::{self, Frame, FLAG_ERROR, FLAG_NOTIFY, FLAG_RESPONSE};
 use mountos_native::wire::*;
 use mountos_native::{open_flag, Client, Error, Options, Range};
@@ -88,12 +91,12 @@ fn start(act: Act) -> Server {
 fn serve(s: &mut UnixStream, hostile: bool, act: Act) {
   while let Ok(Some(f)) = frame::read(s) {
     if f.method == method::HELLO {
-      let m = HelloResponse {
+      let m = build!(HelloResponse {
         version: 1,
         capabilities: vec![],
         max_payload_bytes: 1 << 20,
         max_inflight: 1,
-      };
+      });
       send_ok(s, &f, m.encode_to_vec());
     } else if !hostile {
       send_ok(s, &f, vec![]);
@@ -270,11 +273,10 @@ fn empty_ok(s: &mut UnixStream, f: &Frame) -> bool {
 }
 
 fn unknown_notice(s: &mut UnixStream, f: &Frame) -> bool {
-  let n = Notice {
+  let n = build!(Notice {
     kind: 9999,
     sequence: 1,
-    ..Notice::default()
-  };
+  });
   let mut b = reply_bytes(FLAG_NOTIFY, 62, f.request_id, &n.encode_to_vec());
   b.extend(reply_bytes(FLAG_NOTIFY, 62, f.request_id, &[0xff, 0xff, 0xff]));
   b.extend(good(f));
@@ -296,7 +298,7 @@ fn close_in_body(s: &mut UnixStream, f: &Frame) -> bool {
 
 fn open_then_close(s: &mut UnixStream, f: &Frame) -> bool {
   if f.method == method::OPEN {
-    send_ok(s, f, OpenResponse { handle: 1 }.encode_to_vec());
+    send_ok(s, f, build!(OpenResponse { handle: 1 }).encode_to_vec());
     return true;
   }
   let _ = s.shutdown(std::net::Shutdown::Both);

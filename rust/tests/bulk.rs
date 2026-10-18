@@ -1,5 +1,8 @@
 //! Bulk call tests against an in-process fake server on a Unix socket.
 
+#[macro_use]
+mod common;
+
 use mountos_native::frame::{self, Frame, FLAG_ERROR, FLAG_RESPONSE};
 use mountos_native::wire::*;
 use mountos_native::{open_flag, Client, Error, Options, Range, WriteItem};
@@ -91,10 +94,10 @@ fn resp(req: &Frame, meta: Vec<u8>, extra: u8) -> Frame {
 fn error_frame(req: &Frame, code: &str, message: &str) -> Frame {
   resp(
     req,
-    WireError {
+    build!(WireError {
       code: code.into(),
       message: message.into(),
-    }
+    })
     .encode_to_vec(),
     FLAG_ERROR,
   )
@@ -103,10 +106,12 @@ fn error_frame(req: &Frame, code: &str, message: &str) -> Frame {
 fn item_errors(n: usize, bad: impl Fn(usize) -> bool) -> Vec<BatchItemError> {
   (0..n)
     .filter(|&i| bad(i))
-    .map(|i| BatchItemError {
-      index: i as u32,
-      code: "ENOENT".into(),
-      message: format!("item {i}"),
+    .map(|i| {
+      build!(BatchItemError {
+        index: i as u32,
+        code: "ENOENT".into(),
+        message: format!("item {i}"),
+      })
     })
     .collect()
 }
@@ -114,13 +119,13 @@ fn item_errors(n: usize, bad: impl Fn(usize) -> bool) -> Vec<BatchItemError> {
 fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &mut u64, max_payload: u32) -> Reply {
   let m = &req.meta[..];
   match req.method {
-    method::HELLO => ok(HelloResponse {
+    method::HELLO => ok(build!(HelloResponse {
       version: 1,
       capabilities: vec![],
       max_payload_bytes: max_payload,
       max_inflight: 1,
-    }),
-    method::PING => ok(Empty {}),
+    })),
+    method::PING => ok(Empty::default()),
     method::STAT_BATCH => {
       let r = StatBatchRequest::decode(m).unwrap();
       sh.batches.lock().unwrap().push((req.method, r.paths.len()));
@@ -132,22 +137,21 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       let mut errors = vec![];
       for (i, p) in r.paths.iter().enumerate() {
         match files.get(p) {
-          Some(d) => infos.push(FileInfo {
+          Some(d) => infos.push(build!(FileInfo {
             name: p.clone(),
             size: d.len() as i64,
-            ..Default::default()
-          }),
+          })),
           None => {
             infos.push(FileInfo::default());
-            errors.push(BatchItemError {
+            errors.push(build!(BatchItemError {
               index: i as u32,
               code: "ENOENT".into(),
               message: p.clone(),
-            });
+            }));
           }
         }
       }
-      ok(StatBatchResponse { infos, errors })
+      ok(build!(StatBatchResponse { infos, errors }))
     }
     method::OPEN => {
       let r = OpenRequest::decode(m).unwrap();
@@ -163,12 +167,12 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       let h = *next;
       *next += 1;
       handles.insert(h, r.path);
-      ok(OpenResponse { handle: h })
+      ok(build!(OpenResponse { handle: h }))
     }
     method::CLOSE => {
       let r = CloseRequest::decode(m).unwrap();
       handles.remove(&r.handle).ok_or(("EBADF", "bad handle"))?;
-      ok(Empty {})
+      ok(Empty::default())
     }
     method::READ_AT => {
       let r = ReadAtRequest::decode(m).unwrap();
@@ -181,9 +185,9 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       let start = (r.offset as usize).min(data.len());
       let end = (start + r.length as usize).min(data.len());
       Ok((
-        ReadAtResponse {
+        build!(ReadAtResponse {
           count: (end - start) as u32,
-        }
+        })
         .encode_to_vec(),
         data[start..end].to_vec(),
       ))
@@ -199,9 +203,9 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
         r.offset as usize,
         &req.payload,
       );
-      ok(WriteAtResponse {
+      ok(build!(WriteAtResponse {
         count: req.payload.len() as u32,
-      })
+      }))
     }
     method::READ_BATCH => {
       let r = ReadBatchRequest::decode(m).unwrap();
@@ -225,7 +229,7 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
         payload.extend_from_slice(&data[start..end]);
       }
       let errors = item_errors(r.ranges.len(), |i| r.ranges[i].offset < 0);
-      Ok((ReadBatchResponse { counts, errors }.encode_to_vec(), payload))
+      Ok((build!(ReadBatchResponse { counts, errors }).encode_to_vec(), payload))
     }
     method::WRITE_BATCH => {
       let r = WriteBatchRequest::decode(m).unwrap();
@@ -249,7 +253,7 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
         counts.push(x.length);
       }
       let errors = item_errors(r.ranges.len(), |i| r.ranges[i].offset < 0);
-      ok(WriteBatchResponse { counts, errors })
+      ok(build!(WriteBatchResponse { counts, errors }))
     }
     method::READ_FILE => {
       let r = ReadFileRequest::decode(m).unwrap();
@@ -262,9 +266,9 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       };
       let data = d[..d.len().min(limit)].to_vec();
       Ok((
-        ReadFileResponse {
+        build!(ReadFileResponse {
           count: data.len() as u32,
-        }
+        })
         .encode_to_vec(),
         data,
       ))
@@ -280,9 +284,9 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
         d.clear();
       }
       write_at(d, 0, &req.payload);
-      ok(WriteFileResponse {
+      ok(build!(WriteFileResponse {
         count: req.payload.len() as u32,
-      })
+      }))
     }
     _ => Err(("ENOSYS", "unsupported")),
   }

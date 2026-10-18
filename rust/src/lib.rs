@@ -30,9 +30,6 @@ mod ops_gen;
 mod socket;
 mod walk;
 mod watch;
-// Protobuf messages and enums stay exhaustive. Only the crate and fake servers build them, and the
-// proto only gains fields. Range is built by callers, so build.rs marks it non_exhaustive.
-#[allow(clippy::exhaustive_structs, clippy::exhaustive_enums)]
 pub mod wire;
 
 pub use bulk::StatResult;

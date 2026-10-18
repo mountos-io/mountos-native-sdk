@@ -1,6 +1,9 @@
 //! Pipelining tests against an in-process fake server. The server reads frames on one thread and
 //! answers each request on its own thread, so it sees every request the client has sent.
 
+#[macro_use]
+mod common;
+
 use mountos_native::frame::{self, Frame, FLAG_RESPONSE};
 use mountos_native::wire::*;
 use mountos_native::{open_flag, Client, Error, EventKind, Options};
@@ -103,12 +106,12 @@ fn serve(s: UnixStream, sh: Arc<Shared>, idx: usize) {
       } else {
         vec![]
       };
-      let m = HelloResponse {
+      let m = build!(HelloResponse {
         version: 1,
         capabilities: caps,
         max_payload_bytes: 1 << 20,
         max_inflight: sh.max_inflight,
-      };
+      });
       send(&w, &reply(&req, m.encode_to_vec()));
       continue;
     }
@@ -134,11 +137,8 @@ fn answer(sh: &Shared, w: &Writer, idx: usize, req: Frame) -> usize {
       }
       let d = sh.path_delay.lock().unwrap().get(&p).copied().unwrap_or(0) + sh.stat_delay_ms.load(SeqCst);
       std::thread::sleep(Duration::from_millis(d));
-      let info = FileInfo {
-        name: p,
-        ..Default::default()
-      };
-      let f = reply(&req, StatResponse { info: Some(info) }.encode_to_vec());
+      let info = build!(FileInfo { name: p });
+      let f = reply(&req, build!(StatResponse { info: Some(info) }).encode_to_vec());
       if sh.hold == 0 {
         send(w, &f);
         return 1;
@@ -165,7 +165,7 @@ fn answer(sh: &Shared, w: &Writer, idx: usize, req: Frame) -> usize {
     }
     method::OPEN => {
       std::thread::sleep(Duration::from_millis(sh.open_delay_ms.load(SeqCst)));
-      send(w, &reply(&req, OpenResponse { handle: 42 }.encode_to_vec()));
+      send(w, &reply(&req, build!(OpenResponse { handle: 42 }).encode_to_vec()));
       1
     }
     method::CLOSE => {
@@ -173,11 +173,11 @@ fn answer(sh: &Shared, w: &Writer, idx: usize, req: Frame) -> usize {
         .lock()
         .unwrap()
         .push(CloseRequest::decode(&req.meta[..]).unwrap().handle);
-      send(w, &reply(&req, Empty {}.encode_to_vec()));
+      send(w, &reply(&req, Empty::default().encode_to_vec()));
       1
     }
     method::PING => {
-      send(w, &reply(&req, Empty {}.encode_to_vec()));
+      send(w, &reply(&req, Empty::default().encode_to_vec()));
       1
     }
     m => panic!("unexpected method {m}"),

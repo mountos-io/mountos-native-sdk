@@ -1,5 +1,8 @@
 //! Integration tests against an in-process fake server on a Unix socket.
 
+#[macro_use]
+mod common;
+
 use mountos_native::frame::{self, Frame, FLAG_ERROR, FLAG_RESPONSE};
 use mountos_native::wire::*;
 use mountos_native::{open_flag, Client, Error, Options};
@@ -79,10 +82,10 @@ fn serve(mut s: UnixStream, sh: Arc<Shared>, max_payload: u32) {
       Ok((m, p)) => (FLAG_RESPONSE, m, p),
       Err((code, message)) => (
         FLAG_RESPONSE | FLAG_ERROR,
-        WireError {
+        build!(WireError {
           code: code.into(),
           message: message.into(),
-        }
+        })
         .encode_to_vec(),
         vec![],
       ),
@@ -99,26 +102,25 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
   match req.method {
     method::HELLO => {
       sh.hellos.fetch_add(1, SeqCst);
-      ok(HelloResponse {
+      ok(build!(HelloResponse {
         version: 1,
         capabilities: vec![],
         max_payload_bytes: max_payload,
         max_inflight: 1,
-      })
+      }))
     }
-    method::PING => ok(Empty {}),
+    method::PING => ok(Empty::default()),
     method::STAT => {
       let r = StatRequest::decode(m).unwrap();
       let files = sh.files.lock().unwrap();
       let f = files.get(&r.path).ok_or(("ENOENT", "no such file"))?;
-      ok(StatResponse {
-        info: Some(FileInfo {
+      ok(build!(StatResponse {
+        info: Some(build!(FileInfo {
           name: r.path.clone(),
           size: f.len() as i64,
           mode: 0o644,
-          ..Default::default()
-        }),
-      })
+        })),
+      }))
     }
     method::OPEN => {
       let r = OpenRequest::decode(m).unwrap();
@@ -141,24 +143,21 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       let h = *next;
       *next += 1;
       handles.insert(h, r.path);
-      ok(OpenResponse { handle: h })
+      ok(build!(OpenResponse { handle: h }))
     }
     method::CLOSE => {
       let r = CloseRequest::decode(m).unwrap();
       handles.remove(&r.handle).ok_or(("EBADF", "bad handle"))?;
       sh.closes.fetch_add(1, SeqCst);
-      ok(Empty {})
+      ok(Empty::default())
     }
     method::FSTAT => {
       let r = FstatRequest::decode(m).unwrap();
       let path = handles.get(&r.handle).ok_or(("EBADF", "bad handle"))?;
       let size = sh.files.lock().unwrap()[path].len() as i64;
-      ok(StatResponse {
-        info: Some(FileInfo {
-          size,
-          ..Default::default()
-        }),
-      })
+      ok(build!(StatResponse {
+        info: Some(build!(FileInfo { size })),
+      }))
     }
     method::READ_AT => {
       let r = ReadAtRequest::decode(m).unwrap();
@@ -178,9 +177,9 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       let start = (r.offset as usize).min(data.len());
       let end = (start + r.length as usize).min(data.len());
       Ok((
-        ReadAtResponse {
+        build!(ReadAtResponse {
           count: (end - start) as u32,
-        }
+        })
         .encode_to_vec(),
         data[start..end].to_vec(),
       ))
@@ -199,9 +198,9 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
         data.resize(end, 0);
       }
       data[r.offset as usize..end].copy_from_slice(&req.payload);
-      ok(WriteAtResponse {
+      ok(build!(WriteAtResponse {
         count: req.payload.len() as u32,
-      })
+      }))
     }
     method::LSTAT => {
       let r = LstatRequest::decode(m).unwrap();
@@ -210,13 +209,12 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       if !is_link && !files.contains_key(&r.path) {
         return Err(("ENOENT", "no such file"));
       }
-      ok(StatResponse {
-        info: Some(FileInfo {
+      ok(build!(StatResponse {
+        info: Some(build!(FileInfo {
           name: r.path.clone(),
           r#type: if is_link { FileType::Symlink } else { FileType::Regular } as i32,
-          ..Default::default()
-        }),
-      })
+        })),
+      }))
     }
     method::SYMLINK => {
       let r = SymlinkRequest::decode(m).unwrap();
@@ -225,31 +223,31 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
         return Err(("EEXIST", "exists"));
       }
       links.insert(r.link_path, r.target);
-      ok(Empty {})
+      ok(Empty::default())
     }
     method::READLINK => {
       let r = ReadlinkRequest::decode(m).unwrap();
       let links = sh.links.lock().unwrap();
       let target = links.get(&r.path).ok_or(("EINVAL", "not a symlink"))?;
-      ok(ReadlinkResponse { target: target.clone() })
+      ok(build!(ReadlinkResponse { target: target.clone() }))
     }
     method::LINK => {
       let r = LinkRequest::decode(m).unwrap();
       let mut files = sh.files.lock().unwrap();
       let data = files.get(&r.existing).ok_or(("ENOENT", "no such file"))?.clone();
       files.insert(r.new_path, data);
-      ok(Empty {})
+      ok(Empty::default())
     }
     method::UTIMENS => {
       sh.times.lock().unwrap().push(UtimensRequest::decode(m).unwrap());
-      ok(Empty {})
+      ok(Empty::default())
     }
     method::STATFS => {
       let r = StatfsRequest::decode(m).unwrap();
       if r.path != "/" {
         return Err(("ENOENT", "no such path"));
       }
-      ok(StatfsResponse {
+      ok(build!(StatfsResponse {
         block_size: 4096,
         blocks: 1000,
         blocks_free: 600,
@@ -257,7 +255,7 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
         files: 100,
         files_free: 40,
         name_max: 255,
-      })
+      }))
     }
     method::OPENDIR => {
       let r = OpendirRequest::decode(m).unwrap();
@@ -268,7 +266,7 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       *next += 1;
       // Directory handles store the next entry index after a marker prefix.
       handles.insert(h, "dir:0".into());
-      ok(OpendirResponse { handle: h })
+      ok(build!(OpendirResponse { handle: h }))
     }
     method::READDIR => {
       let r = ReaddirRequest::decode(m).unwrap();
@@ -282,22 +280,19 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       let end = (pos + r.max_entries as usize).min(names.len());
       let entries = names[pos..end]
         .iter()
-        .map(|n| DirEntry {
-          name: n.clone(),
-          ..Default::default()
-        })
+        .map(|n| build!(DirEntry { name: n.clone() }))
         .collect();
       handles.insert(r.handle, format!("dir:{end}"));
-      ok(ReaddirResponse {
+      ok(build!(ReaddirResponse {
         entries,
         eof: end == names.len(),
-      })
+      }))
     }
     method::CLOSEDIR => {
       let r = ClosedirRequest::decode(m).unwrap();
       handles.remove(&r.handle).ok_or(("EBADF", "bad handle"))?;
       sh.dir_closes.fetch_add(1, SeqCst);
-      ok(Empty {})
+      ok(Empty::default())
     }
     method::LS => {
       let r = LsRequest::decode(m).unwrap();
@@ -310,24 +305,24 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       let end = (pos + r.max_entries as usize).min(names.len());
       let entries = names[pos..end]
         .iter()
-        .map(|n| DirEntry {
-          name: n.clone(),
-          info: Some(FileInfo {
+        .map(|n| {
+          build!(DirEntry {
             name: n.clone(),
-            size: n.len() as i64,
-            ..Default::default()
-          }),
-          ..Default::default()
+            info: Some(build!(FileInfo {
+              name: n.clone(),
+              size: n.len() as i64,
+            })),
+          })
         })
         .collect();
-      ok(LsResponse {
+      ok(build!(LsResponse {
         entries,
         next_cursor: if end < names.len() {
           end.to_string()
         } else {
           String::new()
         },
-      })
+      }))
     }
     method::REMOVE_ALL => {
       let r = RemoveAllRequest::decode(m).unwrap();
@@ -335,9 +330,9 @@ fn handle(req: &Frame, sh: &Shared, handles: &mut HashMap<u64, String>, next: &m
       let mut files = sh.files.lock().unwrap();
       let before = files.len();
       files.retain(|k, _| *k != r.path && !k.starts_with(&prefix));
-      ok(RemoveAllResponse {
+      ok(build!(RemoveAllResponse {
         removed: (before - files.len()) as u64,
-      })
+      }))
     }
     _ => Err(("ENOSYS", "not implemented")),
   }
@@ -690,12 +685,11 @@ fn unsolicited_reply_closes_idle_connection() {
       FLAG_RESPONSE,
       req.method,
       req.request_id,
-      HelloResponse {
+      build!(HelloResponse {
         version: 1,
         max_payload_bytes: 1024,
         max_inflight: 1,
-        ..Default::default()
-      }
+      })
       .encode_to_vec(),
       vec![],
     );
@@ -735,7 +729,7 @@ fn mismatched_handshake_reply_is_rejected() {
           FLAG_RESPONSE,
           if wrong_method { method::WATCH } else { req.method },
           req.request_id + u64::from(!wrong_method),
-          WatchResponse { watch_id: 7 }.encode_to_vec(),
+          build!(WatchResponse { watch_id: 7 }).encode_to_vec(),
           vec![],
         ),
       )

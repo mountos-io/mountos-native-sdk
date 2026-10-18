@@ -1,6 +1,9 @@
 //! Notice, listener, watch and warm tests against an in-process fake server that can push
 //! notice frames at any time on any connection.
 
+#[macro_use]
+mod common;
+
 use mountos_native::frame::{self, Frame, FLAG_ERROR, FLAG_NOTIFY, FLAG_RESPONSE};
 use mountos_native::wire::*;
 use mountos_native::{ChangeKind, Client, Error, Event, EventKind, Options, Watch};
@@ -72,10 +75,10 @@ fn reply(req: &Frame, meta: Vec<u8>) -> Frame {
 fn error_reply(req: &Frame, code: &str, message: &str) -> Frame {
   let mut f = reply(
     req,
-    WireError {
+    build!(WireError {
       code: code.into(),
       message: message.into(),
-    }
+    })
     .encode_to_vec(),
   );
   f.flags |= FLAG_ERROR;
@@ -96,12 +99,12 @@ fn serve(s: UnixStream, sh: Arc<Shared>) {
     let f = match req.method {
       method::HELLO => reply(
         &req,
-        HelloResponse {
+        build!(HelloResponse {
           version: 1,
           capabilities: vec![],
           max_payload_bytes: 1 << 20,
           max_inflight: 1,
-        }
+        })
         .encode_to_vec(),
       ),
       method::PING => {
@@ -110,7 +113,7 @@ fn serve(s: UnixStream, sh: Arc<Shared>) {
           send(&out, &p);
           std::thread::sleep(Duration::from_millis(15));
         }
-        reply(&req, Empty {}.encode_to_vec())
+        reply(&req, Empty::default().encode_to_vec())
       }
       method::WATCH => {
         let w = WatchRequest::decode(meta).unwrap();
@@ -119,7 +122,7 @@ fn serve(s: UnixStream, sh: Arc<Shared>) {
         } else {
           let id = sh.next_id.fetch_add(1, SeqCst);
           sh.owners.lock().unwrap().insert(id, idx);
-          let r = reply(&req, WatchResponse { watch_id: id }.encode_to_vec());
+          let r = reply(&req, build!(WatchResponse { watch_id: id }).encode_to_vec());
           if w.path == "/burst" {
             // Changes sent right behind the reply, before the client has returned from the call.
             send(&out, &r);
@@ -139,7 +142,7 @@ fn serve(s: UnixStream, sh: Arc<Shared>) {
         let known = sh.owners.lock().unwrap().get(&u.watch_id) == Some(&idx);
         sh.unwatches.lock().unwrap().push((idx, u.watch_id));
         if known {
-          reply(&req, Empty {}.encode_to_vec())
+          reply(&req, Empty::default().encode_to_vec())
         } else {
           error_reply(&req, "EBADF", "unknown watch")
         }
@@ -147,7 +150,7 @@ fn serve(s: UnixStream, sh: Arc<Shared>) {
       method::WARM_OPEN => {
         let id = sh.next_id.fetch_add(1, SeqCst);
         sh.owners.lock().unwrap().insert(id, idx);
-        reply(&req, WarmOpenResponse { warm_id: id }.encode_to_vec())
+        reply(&req, build!(WarmOpenResponse { warm_id: id }).encode_to_vec())
       }
       _ => error_reply(&req, "ENOSYS", "unsupported"),
     };
@@ -175,21 +178,17 @@ impl Server {
 }
 
 fn notice(kind: NoticeKind, ref_id: u64, seq: u64) -> Notice {
-  Notice {
+  build!(Notice {
     kind: kind as i32,
     sequence: seq,
     ref_id,
-    ..Default::default()
-  }
+  })
 }
 
 fn change(watch: u64, kind: WatchEventKind, path: &str, old: &str, seq: u64) -> Notice {
-  Notice {
-    change_kind: kind as i32,
+  build!(from notice(NoticeKind::Change, watch, seq); change_kind: kind as i32,
     path: path.into(),
-    old_path: old.into(),
-    ..notice(NoticeKind::Change, watch, seq)
-  }
+    old_path: old.into())
 }
 
 fn nframe(n: Notice) -> Frame {
@@ -289,12 +288,9 @@ fn warm_results_reach_every_listener() {
   srv.push_owner(id, notice(NoticeKind::WarmDone, id, 1));
   srv.push_owner(
     id2,
-    Notice {
-      path: "/b".into(),
+    build!(from notice(NoticeKind::WarmFailed, id2, 2); path: "/b".into(),
       code: "ENOENT".into(),
-      message: "no such file".into(),
-      ..notice(NoticeKind::WarmFailed, id2, 2)
-    },
+      message: "no such file".into()),
   );
   for ev in [&a, &b] {
     wait_for("two events", || count(ev) == 2);
@@ -317,12 +313,9 @@ fn no_listener_logs_the_event() {
   let (c, log) = client_with(&srv, 1);
   srv.push(
     0,
-    &nframe(Notice {
-      path: "/x".into(),
+    &nframe(build!(from notice(NoticeKind::WarmFailed, 5, 1); path: "/x".into(),
       code: "EIO".into(),
-      message: "boom".into(),
-      ..notice(NoticeKind::WarmFailed, 5, 1)
-    }),
+      message: "boom".into())),
   );
   wait_for("log line", || !log.lock().unwrap().is_empty());
   {
@@ -577,12 +570,9 @@ fn wait_warm_success_failure_finished_and_timeout() {
   std::thread::sleep(Duration::from_millis(50));
   srv.push_owner(
     b,
-    Notice {
-      code: "EIO".into(),
+    build!(from notice(NoticeKind::WarmFailed, b, 3); code: "EIO".into(),
       message: "read failed".into(),
-      path: "/b".into(),
-      ..notice(NoticeKind::WarmFailed, b, 3)
-    },
+      path: "/b".into()),
   );
   match h.join().unwrap() {
     Err(Error::Server { code, message }) => assert_eq!((code.as_str(), message.as_str()), ("EIO", "read failed")),

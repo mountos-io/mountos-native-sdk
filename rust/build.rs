@@ -10,8 +10,8 @@ fn main() {
   println!("cargo:rerun-if-changed={}", proto.display());
   println!("cargo:rerun-if-env-changed=PROTOC");
   let mut cfg = prost_build::Config::new();
-  // Range is built by callers. Other wire messages are read by callers or built by the crate.
-  cfg.type_attribute(".mountos.filesystem.v1.Range", "#[non_exhaustive]");
+  // Every wire message and enum is non_exhaustive, so a new field or variant never breaks a caller.
+  cfg.type_attribute(".mountos", "#[non_exhaustive]");
   cfg
     .compile_protos(&[proto], &[dir])
     .expect("prost-build failed (protoc must be on PATH or set via PROTOC)");
