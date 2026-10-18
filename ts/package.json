@@ -1,7 +1,30 @@
 {
   "name": "@mountos-io/native-sdk",
   "version": "0.2.0",
-  "description": "Node.js client for the mountOS native filesystem API",
+  "description": "Node.js client for the mountOS native filesystem API. Talk to a mounted mountOS volume (a POSIX filesystem over S3, Azure Blob or Google Cloud Storage) over a local Unix socket, without FUSE.",
+  "keywords": [
+    "mountos",
+    "filesystem",
+    "posix",
+    "unix-socket",
+    "fuse",
+    "object-storage",
+    "s3",
+    "azure-blob",
+    "gcs",
+    "sdk",
+    "native-api",
+    "file-api"
+  ],
+  "homepage": "https://mountos.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mountos-io/mountos-native-sdk.git",
+    "directory": "ts"
+  },
+  "bugs": {
+    "url": "https://github.com/mountos-io/mountos-native-sdk/issues"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/src/index.js",
@@ -23,5 +46,12 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.16.0"
+  },
+  "files": [
+    "dist/src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

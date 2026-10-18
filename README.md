@@ -132,7 +132,7 @@ Never edit a generated file. Change the specs and run `make api-gen`. Generated 
 
 ## Platforms
 
-The mount serves the API on macOS and Linux. Windows support uses the same protocol over AF_UNIX sockets and is not yet tested. The Go and TypeScript SDKs have no Unix-only code. The Rust SDK uses Unix sockets and builds on Unix systems only.
+The mount serves the API on macOS, Linux, and Windows (AF_UNIX sockets on Windows 10 and later). The Go client has run its live conformance suite against a Windows mount. The TypeScript and Rust clients are not yet run against a Windows mount. The Go and TypeScript SDKs have no Unix-only code. The Rust SDK uses Unix sockets and builds on Unix systems only.
 
 ## License
 

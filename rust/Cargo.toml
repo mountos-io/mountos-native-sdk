@@ -3,8 +3,14 @@ name = "mountos-native"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.87"
-description = "Client for the mountOS native filesystem API"
+description = "Rust client for the mountOS native filesystem API. Talk to a mounted mountOS volume (a POSIX filesystem over S3, Azure Blob or Google Cloud Storage) over a local Unix socket, without FUSE."
+repository = "https://github.com/mountos-io/mountos-native-sdk"
+homepage = "https://mountos.io"
+documentation = "https://docs.rs/mountos-native"
+readme = "README.md"
 license = "Apache-2.0"
+keywords = ["mountos", "filesystem", "posix", "object-storage", "sdk"]
+categories = ["api-bindings", "filesystem"]
 
 [dependencies]
 prost = "0.13"
