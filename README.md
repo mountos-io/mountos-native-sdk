@@ -30,7 +30,7 @@ A mount serves one socket. Its path comes from the mount path:
 <home>/.mountOS/sockets/mountos_api_<hash>.sock
 ```
 
-`<hash>` is the first 8 bytes of the SHA-256 of the mount path, as 16 hex characters. The mount path is the path the mount was started with. When this path is longer than the Unix socket limit, the socket is in `/tmp/mountos-<uid>/` instead. The directory is private to the user who owns the mount.
+`<hash>` is the first 8 bytes of the SHA-256 of the mount path, as 16 hex characters. The mount path is the path the mount was started with, resolved through symlinks before hashing. When this path is longer than the Unix socket limit, the socket is in `/tmp/mountos-<uid>/` instead. The directory is private to the user who owns the mount.
 
 Each SDK computes this path for you. The call only computes the path. It does not create or check anything.
 
@@ -46,7 +46,7 @@ const sock = socketPath("/mnt/vol");          // TypeScript, exported from the p
 let sock = mountos_native::socket_path("/mnt/vol")?;   // Rust
 ```
 
-Pass the mount path exactly as the mount was started. A different spelling of the same folder gives a different socket. The home directory comes from `$HOME`, then the account database. Rust reads `/etc/passwd` for the account entry.
+Pass the mount path exactly as the mount was started. Paths that differ only by symlinks give the same socket. Other spellings of the same folder give a different socket. The home directory comes from `$HOME`, then the account database. Rust reads `/etc/passwd` for the account entry.
 
 ## Quick start
 

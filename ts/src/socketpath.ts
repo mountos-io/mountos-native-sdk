@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 
@@ -19,13 +20,25 @@ export function socketPath(mountPath: string): string {
   if (mountPath === "") {
     throw new Error("socketPath: empty mount path");
   }
-  const sum = createHash("sha256").update(mountPath, "utf8").digest("hex");
+  const sum = createHash("sha256").update(resolveMountPath(mountPath), "utf8").digest("hex");
   const name = `mountos_api_${sum.slice(0, 16)}.sock`;
   const preferred = join(socketsDir(), name);
   if (Buffer.byteLength(preferred) <= maxUnixSocketPath) {
     return preferred;
   }
   return join(fallbackSocketsDir(), name);
+}
+
+// Hashes the symlink-resolved path, as the mount does. A path that does not exist keeps its spelling.
+function resolveMountPath(mountPath: string): string {
+  if (process.platform === "win32") {
+    return mountPath;
+  }
+  try {
+    return realpathSync(mountPath);
+  } catch {
+    return mountPath;
+  }
 }
 
 function socketsDir(): string {

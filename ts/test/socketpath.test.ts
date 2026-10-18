@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { socketPath } from "../src/index.js";
@@ -51,6 +54,27 @@ test("socketPath limit is inclusive at 103 bytes", { skip: !posix }, () => {
   assert.ok(at.startsWith(fit));
   const over = withHome(fit + "h", () => socketPath("/mnt/vol"));
   assert.ok(over.startsWith("/tmp/mountos-"));
+});
+
+test("socketPath resolves symlinks before hashing", { skip: !posix }, () => {
+  const root = mkdtempSync(join(tmpdir(), "mos-sock-"));
+  try {
+    const target = join(root, "target");
+    const link = join(root, "link");
+    mkdirSync(target);
+    symlinkSync(target, link);
+    const want = withHome("/home/u", () => socketPath(target));
+    assert.equal(withHome("/home/u", () => socketPath(link)), want);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("socketPath keeps the spelling of a missing path", { skip: !posix }, () => {
+  const missing = join(tmpdir(), `mos-sock-missing-${process.pid}`, "vol");
+  const sum = createHash("sha256").update(missing, "utf8").digest("hex");
+  const got = withHome("/home/u", () => socketPath(missing));
+  assert.equal(got, join("/home/u/.mountOS/sockets", `mountos_api_${sum.slice(0, 16)}.sock`));
 });
 
 test("socketPath rejects an empty mount path", () => {

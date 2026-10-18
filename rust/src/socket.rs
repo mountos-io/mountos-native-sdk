@@ -28,6 +28,9 @@ pub fn socket_path(mount_path: impl AsRef<Path>) -> Result<PathBuf> {
       "socket_path: empty mount path",
     )));
   }
+  // Hash the symlink-resolved path, as the mount does. A path that does not exist keeps its spelling.
+  let resolved = std::fs::canonicalize(mount_path).ok();
+  let mount_path = resolved.as_deref().unwrap_or(mount_path);
   let name = socket_name(mount_path.as_os_str().as_bytes());
   let preferred = clean(&sockets_dir().join(&name));
   if preferred.as_os_str().len() <= MAX_UNIX_SOCKET_PATH {
@@ -229,6 +232,27 @@ mod tests {
     let over = format!("{fit}h");
     let got = with_home(&over, || socket_path("/mnt/vol")).unwrap();
     assert!(got.starts_with("/tmp"));
+  }
+
+  #[test]
+  fn symlink_resolves_before_hashing() {
+    let root = std::env::temp_dir().join(format!("mos-sock-{}", std::process::id()));
+    let target = root.join("target");
+    let link = root.join("link");
+    std::fs::create_dir_all(&target).unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let want = with_home("/home/u", || socket_path(&target)).unwrap();
+    let got = with_home("/home/u", || socket_path(&link)).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(got, want);
+  }
+
+  #[test]
+  fn missing_path_keeps_spelling() {
+    let missing = "/nonexistent-mountos-sock/vol";
+    let got = with_home("/home/u", || socket_path(missing)).unwrap();
+    let name = socket_name(missing.as_bytes());
+    assert_eq!(got, Path::new("/home/u/.mountOS/sockets").join(name));
   }
 
   #[test]

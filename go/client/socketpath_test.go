@@ -1,6 +1,8 @@
 package client
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -80,6 +82,50 @@ func TestSocketPathLimitIsInclusive(t *testing.T) {
 	got, _ = SocketPath("/mnt/vol")
 	if !strings.HasPrefix(got, "/tmp/mountos-") {
 		t.Fatalf("over limit: %s", got)
+	}
+}
+
+func TestSocketPathResolvesSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink resolution is Unix-only")
+	}
+	setHome(t, "/home/u")
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	want, err := SocketPath(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := SocketPath(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("via symlink %s, want %s", got, want)
+	}
+}
+
+func TestSocketPathMissingPathKeepsSpelling(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("golden paths use a Unix home")
+	}
+	setHome(t, "/home/u")
+	missing := filepath.Join(t.TempDir(), "missing")
+	sum := sha256.Sum256([]byte(missing))
+	want := filepath.Join("/home/u/.mountOS/sockets", "mountos_api_"+hex.EncodeToString(sum[:8])+".sock")
+	got, err := SocketPath(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("got %s want %s", got, want)
 	}
 }
 

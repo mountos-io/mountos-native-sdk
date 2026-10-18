@@ -28,6 +28,12 @@ func SocketPath(mountPath string) (string, error) {
 	if mountPath == "" {
 		return "", errors.New("mountos: SocketPath: empty mount path")
 	}
+	// Hash the symlink-resolved path, as the mount does. A path that does not exist keeps its spelling.
+	if runtime.GOOS != "windows" {
+		if resolved, err := filepath.EvalSymlinks(mountPath); err == nil {
+			mountPath = resolved
+		}
+	}
 	sum := sha256.Sum256([]byte(mountPath))
 	name := "mountos_api_" + hex.EncodeToString(sum[:8]) + ".sock"
 	if preferred := filepath.Join(socketsDir(), name); len(preferred) <= maxUnixSocketPath {
