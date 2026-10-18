@@ -25,6 +25,8 @@ export class FakeServer {
   times = new Map<string, { atime?: bigint; mtime?: bigint }>();
   private dirPos = new Map<string, number>();
   maxPayload = 1000;
+  /** Capabilities the Hello reply reports. Empty reports none, like an older server. */
+  capabilities: string[] = [];
   readDelayMs = 0;
   helloCount = 0;
   readFileCalls = 0;
@@ -187,7 +189,7 @@ export class FakeServer {
         greet();
         this.helloCount++;
         return this.ok(s, r, pb.HelloResponse, {
-          version: 1, capabilities: [], maxPayloadBytes: this.maxPayload, maxInflight: 1,
+          version: 1, capabilities: this.capabilities, maxPayloadBytes: this.maxPayload, maxInflight: 1,
         });
       case 2:
         return this.reply(s, r, empty);
@@ -315,7 +317,10 @@ export class FakeServer {
         const start = q.cursor !== "" ? Number(q.cursor) : 0;
         const max = q.maxEntries || names.length;
         return this.ok(s, r, pb.LsResponse, {
-          entries: names.slice(start, start + max).map((n) => this.entry(n, true)),
+          entries: names.slice(start, start + max).map((n) => {
+            const sub = q.path === "/" ? "/" + n : q.path + "/" + n;
+            return this.entry(n, true, this.dirs.has(sub) ? 1 : 0);
+          }),
           nextCursor: start + max < names.length ? String(start + max) : "",
         });
       }
@@ -447,7 +452,7 @@ export class FakeServer {
     };
   }
 
-  private entry(name: string, withInfo: boolean): pb.DirEntry {
-    return { name, type: 0, info: withInfo ? this.info(name, name.length, 0, 7n) : undefined };
+  private entry(name: string, withInfo: boolean, type = 0): pb.DirEntry {
+    return { name, type, info: withInfo ? this.info(name, name.length, type, 7n) : undefined };
   }
 }

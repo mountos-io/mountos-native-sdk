@@ -83,6 +83,7 @@ var posixErrnos = map[string]bool{
 	"EISDIR": true, "ELOOP": true, "ENOENT": true, "ENOSPC": true,
 	"ENOTDIR": true, "ENOTEMPTY": true, "EPERM": true, "EROFS": true,
 	"EXDEV": true, "EINVAL": true, "EAGAIN": true,
+	"ENAMETOOLONG": true, "EMLINK": true, "EBUSY": true, "EDQUOT": true, "ESTALE": true,
 }
 
 var opKinds = map[string]bool{

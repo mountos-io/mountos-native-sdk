@@ -34,14 +34,13 @@ impl Client {
   /// Starts a watch on `path`. `since` asks for events after that sequence. The server keeps
   /// no history, so an older value yields one Overflow event. Pass 0 for new events only.
   pub fn watch(&self, path: &str, recursive: bool, since: u64) -> Result<Watch> {
-    let slot = self.pick().clone();
     let chan = Arc::new(Chan::new(WATCH_QUEUE, 0));
     let req = WatchRequest {
       path: path.into(),
       recursive,
       since_sequence: since,
     };
-    let ((r, _), epoch) = slot.run(None, |c| {
+    let ((r, _), slot, epoch) = self.run_any(|c| {
       *lock(&c.shared.pending_watch) = Some(chan.clone());
       let r = c.call_msg::<WatchResponse>(method::WATCH, &req, &[]);
       *lock(&c.shared.pending_watch) = None;
@@ -49,7 +48,7 @@ impl Client {
     })?;
     Ok(Watch {
       id: r.watch_id,
-      slot,
+      slot: slot.clone(),
       epoch,
       chan,
       hub: self.inner.hub.clone(),
@@ -83,7 +82,7 @@ impl Watch {
       .slot
       .run(Some(self.epoch), |c| c.call_msg::<Empty>(method::UNWATCH, &req, &[]))
     {
-      Ok(_) | Err(Error::Io(_)) => Ok(()),
+      Ok(_) | Err(Error::Io(_)) | Err(Error::Timeout(_)) => Ok(()),
       Err(Error::Server { code, .. }) if code == "EBADF" => Ok(()),
       Err(e) => Err(e),
     }

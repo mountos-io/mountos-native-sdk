@@ -2,8 +2,11 @@
 
 use crate::client::Client;
 use crate::error::{Error, Result};
+use crate::events::lock;
 use crate::frame::MAX_META_BYTES;
 use crate::wire::*;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 /// The server rejects more items than this in one batch request.
 pub(crate) const MAX_BATCH_ITEMS: usize = 4096;
@@ -34,12 +37,48 @@ pub(crate) fn batch_errors(n: usize, errors: Vec<BatchItemError>) -> Result<Vec<
   Ok(out)
 }
 
+/// Runs `job(0..n)` on up to `workers` threads and returns the results in index order. After the
+/// first failure no new job starts. The first failure in index order is returned.
+pub(crate) fn par_map<T: Send>(n: usize, workers: usize, job: impl Fn(usize) -> Result<T> + Sync) -> Result<Vec<T>> {
+  if n <= 1 || workers <= 1 {
+    return (0..n).map(job).collect();
+  }
+  let next = AtomicUsize::new(0);
+  let failed = AtomicBool::new(false);
+  let slots: Mutex<Vec<Option<Result<T>>>> = Mutex::new((0..n).map(|_| None).collect());
+  std::thread::scope(|sc| {
+    for _ in 0..workers.min(n) {
+      sc.spawn(|| loop {
+        let i = next.fetch_add(1, Ordering::SeqCst);
+        if i >= n || failed.load(Ordering::SeqCst) {
+          break;
+        }
+        let r = job(i);
+        if r.is_err() {
+          failed.store(true, Ordering::SeqCst);
+        }
+        lock(&slots)[i] = Some(r);
+      });
+    }
+  });
+  let mut out = Vec::with_capacity(n);
+  for r in slots
+    .into_inner()
+    .unwrap_or_else(|e| e.into_inner())
+    .into_iter()
+    .flatten()
+  {
+    out.push(r?);
+  }
+  Ok(out)
+}
+
 impl Client {
   /// Returns attributes for many paths. The result has one entry per path in input order.
-  /// Large inputs are split into several requests.
+  /// Large inputs are split into several requests that run in parallel on the pool.
   pub fn stat_batch(&self, paths: &[String]) -> Result<Vec<StatResult>> {
     let meta_budget = MAX_META_BYTES as usize / 2;
-    let mut out = Vec::with_capacity(paths.len());
+    let mut parts = Vec::new();
     let mut start = 0;
     while start < paths.len() {
       let (mut end, mut size) = (start, 0usize);
@@ -50,7 +89,11 @@ impl Client {
         size += paths[end].len() + 8;
         end += 1;
       }
-      let part = &paths[start..end];
+      parts.push(&paths[start..end]);
+      start = end;
+    }
+    let chunks = par_map(parts.len(), self.pool_size(), |i| {
+      let part = parts[i];
       let r: StatBatchResponse = self.unary(method::STAT_BATCH, &StatBatchRequest { paths: part.to_vec() })?;
       if r.infos.len() != part.len() {
         return Err(Error::Protocol(format!(
@@ -60,23 +103,25 @@ impl Client {
         )));
       }
       let mut errs = batch_errors(part.len(), r.errors)?;
-      for (i, info) in r.infos.into_iter().enumerate() {
-        out.push(match errs[i].take() {
-          Some(e) => Err(e),
-          None => Ok(info),
-        });
-      }
-      start = end;
-    }
-    Ok(out)
+      Ok(
+        r.infos
+          .into_iter()
+          .enumerate()
+          .map(|(i, info)| match errs[i].take() {
+            Some(e) => Err(e),
+            None => Ok(info),
+          })
+          .collect::<Vec<_>>(),
+      )
+    })?;
+    Ok(chunks.into_iter().flatten().collect())
   }
 
   /// Reads a whole file. A file that fits in one payload takes one request. A larger file is
   /// opened and read in chunks until end of file.
   pub fn read_file(&self, path: &str) -> Result<Vec<u8>> {
     let (data, limit) = self
-      .pick()
-      .run(None, |c| {
+      .run_any(|c| {
         let req = ReadFileRequest {
           path: path.into(),
           max_bytes: c.max_payload as u64,
@@ -111,8 +156,7 @@ impl Client {
   /// first. Data larger than one payload is written through an opened file in chunks.
   pub fn write_file(&self, path: &str, data: &[u8], truncate: bool) -> Result<()> {
     let sent = self
-      .pick()
-      .run(None, |c| {
+      .run_any(|c| {
         if data.len() > c.max_payload {
           return Ok(false);
         }

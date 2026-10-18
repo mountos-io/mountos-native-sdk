@@ -3,6 +3,9 @@ package client
 import (
 	"fmt"
 	"io"
+	"slices"
+	"sync"
+	"sync/atomic"
 
 	"github.com/mountos-io/mountos-native-sdk/go/wire"
 )
@@ -57,33 +60,92 @@ func itemErrors(list []*wire.BatchItemError, n int, op string) (map[int]error, e
 	return m, nil
 }
 
+// statChunks splits paths into requests of at most maxBatchItems paths whose
+// encoded size stays well under the metadata limit.
+func statChunks(paths []string) [][]string {
+	var out [][]string
+	for len(paths) > 0 {
+		n, bytes := 0, 0
+		for n < len(paths) && n < maxBatchItems && (n == 0 || bytes+len(paths[n])+pathOverhead <= maxMetaBytes/2) {
+			bytes += len(paths[n]) + pathOverhead
+			n++
+		}
+		out = append(out, paths[:n])
+		paths = paths[n:]
+	}
+	return out
+}
+
+// pathOverhead is the encoded size of a path beyond its bytes: tag and length.
+const pathOverhead = 8
+
 // StatBatch stats every path and returns one result per path, in order. A
 // failed path sets Err for that entry only. Large inputs are split into
-// several requests.
+// several requests that run in parallel across the pool.
 func (cl *Client) StatBatch(paths []string) ([]StatResult, error) {
-	out := make([]StatResult, 0, len(paths))
-	for start := 0; start < len(paths); start += maxBatchItems {
-		part := paths[start:min(len(paths), start+maxBatchItems)]
+	chunks := statChunks(paths)
+	parts := make([][]StatResult, len(chunks))
+	err := parallelDo(len(cl.conns), len(chunks), func(_, ci int) error {
+		part := chunks[ci]
 		var r wire.StatBatchResponse
 		if err := cl.run(mStatBatch, &wire.StatBatchRequest{Paths: part}, &r); err != nil {
-			return nil, err
+			return err
 		}
 		if len(r.GetInfos()) != len(part) {
-			return nil, &ProtocolError{Op: "stat batch", Err: fmt.Errorf("%d infos for %d paths", len(r.GetInfos()), len(part))}
+			return &ProtocolError{Op: "stat batch", Err: fmt.Errorf("%d infos for %d paths", len(r.GetInfos()), len(part))}
 		}
 		errs, err := itemErrors(r.GetErrors(), len(part), "stat batch")
 		if err != nil {
-			return nil, err
+			return err
 		}
+		res := make([]StatResult, len(part))
 		for i, info := range r.GetInfos() {
 			if e, ok := errs[i]; ok {
-				out = append(out, StatResult{Err: e})
+				res[i] = StatResult{Err: e}
 			} else {
-				out = append(out, StatResult{Info: info})
+				res[i] = StatResult{Info: info}
 			}
 		}
+		parts[ci] = res
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]StatResult, 0, len(paths))
+	for _, p := range parts {
+		out = append(out, p...)
 	}
 	return out, nil
+}
+
+// parallelDo runs fn for every index below n on up to workers goroutines. fn
+// gets its worker number, which is below workers, so a worker can own a
+// resource. After the first error no new index starts. It returns that error.
+func parallelDo(workers, n int, fn func(worker, i int) error) error {
+	var next atomic.Int64
+	var failed atomic.Bool
+	var once sync.Once
+	var first error
+	var wg sync.WaitGroup
+	for w := 0; w < min(workers, n); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for !failed.Load() {
+				i := int(next.Add(1) - 1)
+				if i >= n {
+					return
+				}
+				if err := fn(w, i); err != nil {
+					once.Do(func() { first = err })
+					failed.Store(true)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	return first
 }
 
 // piece is a slice of one caller item, small enough to travel in one frame.
@@ -135,9 +197,85 @@ func wireRanges(ps []piece) []*wire.Range {
 	return rs
 }
 
+// overlaps reports whether any two non-empty ranges share a byte.
+func overlaps(offsets []int64, lengths []int) bool {
+	idx := make([]int, 0, len(offsets))
+	for i, n := range lengths {
+		if n > 0 {
+			idx = append(idx, i)
+		}
+	}
+	slices.SortFunc(idx, func(a, b int) int { return int(offsets[a] - offsets[b]) })
+	var end int64
+	for k, i := range idx {
+		if k > 0 && offsets[i] < end {
+			return true
+		}
+		end = max(end, offsets[i]+int64(lengths[i]))
+	}
+	return false
+}
+
+// fanout returns handles to the same file on other pooled connections, so batch
+// groups can run in parallel. f comes first. A handle counts only when its inode
+// equals f's, so a path that names another file is never used. When the
+// server gives no inode, or any step fails, the batch stays on f alone. The
+// caller holds f.mu and calls release on the result.
+func (f *File) fanout(groupCount int) []*File {
+	files := []*File{f}
+	want := min(groupCount, len(f.cl.conns))
+	if want < 2 || f.path == "" {
+		return files
+	}
+	info, err := f.fstat()
+	if err != nil || info.GetInode() == 0 {
+		return files
+	}
+	for _, c := range f.cl.conns {
+		if len(files) == want {
+			break
+		}
+		if c == f.c {
+			continue
+		}
+		c.lock()
+		sf, err := f.cl.openLocked(c, f.path, f.flags&3, 0)
+		c.unlock()
+		if err != nil {
+			continue
+		}
+		if si, err := sf.fstat(); err != nil || si.GetInode() != info.GetInode() {
+			sf.Close()
+			continue
+		}
+		files = append(files, sf)
+	}
+	return files
+}
+
+// release closes the handles fanout opened and returns the first close error.
+func release(files []*File) error {
+	var first error
+	for _, sf := range files[1:] {
+		if err := sf.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+// readGroup is the checked reply to one ReadBatch request.
+type readGroup struct {
+	counts []uint32
+	data   []byte
+	errs   map[int]error
+}
+
 // ReadBatch reads several ranges of the file in as few requests as the server
-// limits allow. Results are in range order. A range past end of file returns
-// fewer bytes than its length. The File position is not used or changed.
+// limits allow. Requests run in parallel on several connections when the file
+// can be opened again by path. Results are in range order. A range past end of
+// file returns fewer bytes than its length, and bytes after a short or failed
+// part of a range are dropped. The File position is not used or changed.
 func (f *File) ReadBatch(ranges []Range) ([]ReadResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -149,42 +287,73 @@ func (f *File) ReadBatch(ranges []Range) ([]ReadResult, error) {
 		}
 		offsets[i], lengths[i] = r.Offset, int(r.Length)
 	}
-	res := make([]ReadResult, len(ranges))
-	for _, g := range groups(pieces(offsets, lengths, f.chunk()), f.chunk()) {
+	gs := groups(pieces(offsets, lengths, f.chunk()), f.chunk())
+	files := f.fanout(len(gs))
+	outs := make([]readGroup, len(gs))
+	err := parallelDo(len(files), len(gs), func(w, gi int) error {
+		g := gs[gi]
 		var r wire.ReadBatchResponse
-		data, err := f.do(mReadBatch, &wire.ReadBatchRequest{Handle: f.handle, Ranges: wireRanges(g)}, &r, nil)
+		data, err := files[w].do(mReadBatch, &wire.ReadBatchRequest{Handle: files[w].handle, Ranges: wireRanges(g)}, &r, nil)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if len(r.GetCounts()) != len(g) {
-			return nil, &ProtocolError{Op: "read batch", Err: fmt.Errorf("%d counts for %d ranges", len(r.GetCounts()), len(g))}
+			return &ProtocolError{Op: "read batch", Err: fmt.Errorf("%d counts for %d ranges", len(r.GetCounts()), len(g))}
 		}
 		errs, err := itemErrors(r.GetErrors(), len(g), "read batch")
 		if err != nil {
-			return nil, err
+			return err
 		}
 		pos := 0
 		for i, p := range g {
 			n := int(r.GetCounts()[i])
 			if n > p.length || pos+n > len(data) {
-				return nil, &ProtocolError{Op: "read batch", Err: fmt.Errorf("count %d for range %d of %d bytes, payload %d", n, i, p.length, len(data))}
+				return &ProtocolError{Op: "read batch", Err: fmt.Errorf("count %d for range %d of %d bytes, payload %d", n, i, p.length, len(data))}
 			}
-			out := &res[p.owner]
-			out.Data = append(out.Data, data[pos:pos+n]...)
 			pos += n
-			if e, ok := errs[i]; ok && out.Err == nil {
-				out.Err = e
-			}
 		}
 		if pos != len(data) {
-			return nil, &ProtocolError{Op: "read batch", Err: fmt.Errorf("payload %d bytes, counts sum %d", len(data), pos)}
+			return &ProtocolError{Op: "read batch", Err: fmt.Errorf("payload %d bytes, counts sum %d", len(data), pos)}
+		}
+		outs[gi] = readGroup{counts: r.GetCounts(), data: data, errs: errs}
+		return nil
+	})
+	release(files)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]ReadResult, len(ranges))
+	short := make([]bool, len(ranges)) // a part came back short or failed, so later parts would leave a hole
+	for gi, g := range gs {
+		o := outs[gi]
+		pos := 0
+		for i, p := range g {
+			n := int(o.counts[i])
+			out := &res[p.owner]
+			if !short[p.owner] {
+				out.Data = append(out.Data, o.data[pos:pos+n]...)
+				short[p.owner] = n < p.length
+			}
+			pos += n
+			if e, ok := o.errs[i]; ok && out.Err == nil {
+				out.Err = e
+				short[p.owner] = true
+			}
 		}
 	}
 	return res, nil
 }
 
+// writeGroup is the checked reply to one WriteBatch request.
+type writeGroup struct {
+	counts []uint32
+	errs   map[int]error
+}
+
 // WriteBatch writes several items in as few requests as the server limits
-// allow. Results are in item order. The File position is not used or changed.
+// allow. Requests run in parallel on several connections when the file can be
+// opened again by path and no two items overlap. Results are in item order.
+// The File position is not used or changed.
 func (f *File) WriteBatch(items []WriteItem) ([]WriteResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -196,31 +365,56 @@ func (f *File) WriteBatch(items []WriteItem) ([]WriteResult, error) {
 		}
 		offsets[i], lengths[i] = it.Offset, len(it.Data)
 	}
-	res := make([]WriteResult, len(items))
-	for _, g := range groups(pieces(offsets, lengths, f.chunk()), f.chunk()) {
-		var payload []byte
+	gs := groups(pieces(offsets, lengths, f.chunk()), f.chunk())
+	files := []*File{f}
+	if len(gs) > 1 && !overlaps(offsets, lengths) {
+		files = f.fanout(len(gs))
+	}
+	outs := make([]writeGroup, len(gs))
+	err := parallelDo(len(files), len(gs), func(w, gi int) error {
+		g := gs[gi]
+		total := 0
+		for _, p := range g {
+			total += p.length
+		}
+		payload := make([]byte, 0, total)
 		for _, p := range g {
 			payload = append(payload, items[p.owner].Data[p.src:p.src+p.length]...)
 		}
 		var r wire.WriteBatchResponse
-		if _, err := f.do(mWriteBatch, &wire.WriteBatchRequest{Handle: f.handle, Ranges: wireRanges(g)}, &r, payload); err != nil {
-			return nil, err
+		if _, err := files[w].do(mWriteBatch, &wire.WriteBatchRequest{Handle: files[w].handle, Ranges: wireRanges(g)}, &r, payload); err != nil {
+			return err
 		}
 		if len(r.GetCounts()) != len(g) {
-			return nil, &ProtocolError{Op: "write batch", Err: fmt.Errorf("%d counts for %d ranges", len(r.GetCounts()), len(g))}
+			return &ProtocolError{Op: "write batch", Err: fmt.Errorf("%d counts for %d ranges", len(r.GetCounts()), len(g))}
 		}
 		errs, err := itemErrors(r.GetErrors(), len(g), "write batch")
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for i, p := range g {
-			n := int(r.GetCounts()[i])
-			if n > p.length {
-				return nil, &ProtocolError{Op: "write batch", Err: fmt.Errorf("count %d exceeds sent %d", n, p.length)}
+			if n := int(r.GetCounts()[i]); n > p.length {
+				return &ProtocolError{Op: "write batch", Err: fmt.Errorf("count %d exceeds sent %d", n, p.length)}
 			}
+		}
+		outs[gi] = writeGroup{counts: r.GetCounts(), errs: errs}
+		return nil
+	})
+	cerr := release(files)
+	if err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return nil, err
+	}
+	res := make([]WriteResult, len(items))
+	for gi, g := range gs {
+		o := outs[gi]
+		for i, p := range g {
+			n := int(o.counts[i])
 			out := &res[p.owner]
 			out.N += n
-			if e, ok := errs[i]; ok && out.Err == nil {
+			if e, ok := o.errs[i]; ok && out.Err == nil {
 				out.Err = e
 			} else if n < p.length && out.Err == nil {
 				out.Err = io.ErrShortWrite
@@ -239,13 +433,13 @@ func (cl *Client) ReadFile(path string) ([]byte, error) {
 	}
 	c := cl.acquire()
 	if err := c.ensure(); err != nil {
-		c.mu.Unlock()
+		c.unlock()
 		return nil, err
 	}
 	limit := c.maxData
 	var r wire.ReadFileResponse
 	data, err := c.call(mReadFile, &wire.ReadFileRequest{Path: path, MaxBytes: uint64(limit)}, &r, nil)
-	c.mu.Unlock()
+	c.unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -282,13 +476,13 @@ func (cl *Client) WriteFile(path string, data []byte, truncate bool) error {
 	}
 	c := cl.acquire()
 	if err := c.ensure(); err != nil {
-		c.mu.Unlock()
+		c.unlock()
 		return err
 	}
 	if len(data) <= c.maxData {
 		var r wire.WriteFileResponse
 		_, err := c.call(mWriteFile, &wire.WriteFileRequest{Path: path, Truncate: truncate}, &r, data)
-		c.mu.Unlock()
+		c.unlock()
 		if err != nil {
 			return err
 		}
@@ -297,7 +491,7 @@ func (cl *Client) WriteFile(path string, data []byte, truncate bool) error {
 		}
 		return nil
 	}
-	c.mu.Unlock()
+	c.unlock()
 	flags := wire.OpenFlag_OPEN_FLAG_WRITE_ONLY | wire.OpenFlag_OPEN_FLAG_CREATE
 	if truncate {
 		flags |= wire.OpenFlag_OPEN_FLAG_TRUNC

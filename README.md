@@ -32,6 +32,22 @@ A mount serves one socket. Its path comes from the mount path:
 
 `<hash>` is the first 8 bytes of the SHA-256 of the mount path, as 16 hex characters. The mount path is the path the mount was started with. When this path is longer than the Unix socket limit, the socket is in `/tmp/mountos-<uid>/` instead. The directory is private to the user who owns the mount.
 
+Each SDK computes this path for you. The call only computes the path. It does not create or check anything.
+
+```go
+sock, err := client.SocketPath("/mnt/vol")   // Go
+```
+
+```ts
+const sock = socketPath("/mnt/vol");          // TypeScript, exported from the package
+```
+
+```rust
+let sock = mountos_native::socket_path("/mnt/vol")?;   // Rust
+```
+
+Pass the mount path exactly as the mount was started. A different spelling of the same folder gives a different socket. The home directory comes from `$HOME`, then the account database. Rust reads `/etc/passwd` for the account entry.
+
 ## Quick start
 
 Go:
@@ -80,6 +96,18 @@ err = c.WaitWarm(ctx, id)
 ```
 
 Warming needs the local cache. A mount started with `--disable-cache-dir` refuses `WarmOpen` and `WarmRead` at once with `UNSUPPORTED_OPERATION`.
+
+## Pool, timeouts and helpers
+
+Rust: a call runs on the first free connection of the pool. A large read or write sends one request at a time, so other calls use the connection between requests. `Options::call_timeout` limits each request (default `Duration::ZERO`, no limit). A call that runs over returns `Error::Timeout` (code `DEADLINE_EXCEEDED`, `io::ErrorKind::TimedOut`), and its connection is dropped and dialed again. A request larger than the frame limits returns `Error::TooLarge` and leaves the connection intact. When the server reports capabilities, `watch`, `warm_open`, `warm_read`, `ls`, `remove_all` and the bulk calls fail locally with `UNSUPPORTED_OPERATION` if the capability is missing. `stat_batch` sends its chunks in parallel. `walk(path, f)` visits every entry below a path with its attributes, and `read_dir_all(path)` lists one directory. `File::write_batch` returns `Error::Partial` for an item cut short, with the bytes written.
+
+Go: a call runs on the first free connection of the pool. `Options.CallTimeout` limits each request (default 0, no limit). A call that runs over returns `*TimeoutError` (code `DEADLINE_EXCEEDED`, `errors.Is(err, context.DeadlineExceeded)`), and its connection is dropped and dialed again. A request larger than the frame limits fails that call only. When the server reports capabilities, `Watch`, `WarmOpen`, `WarmRead`, `Ls`, `RemoveAll` and the bulk calls fail locally with `UNSUPPORTED_OPERATION` if the capability is missing. `StatBatch` sends its chunks in parallel. `ReadBatch` and `WriteBatch` run their requests in parallel on several connections when the file can be opened again by path, checked by inode. `WalkDir(root, fn)` visits every entry below a path with its attributes, in server order. `fn` can return `fs.SkipDir` for a directory or any error to stop. `ReadDirAll(path)` lists one directory. A slow listener does not delay `Watch` events.
+
+## Timeouts and walking (TypeScript)
+
+Pass `callTimeout` (ms, default 0 for none) to `Client.connect`. A request that runs longer fails with `DeadlineExceededError` (code `DEADLINE_EXCEEDED`), and its connection is dropped and dialed again on a later call. If the server reports its capabilities in Hello, a call to `watch`, `ls`, a warm call, or a bulk call that the server did not offer fails at once with `UNSUPPORTED_OPERATION`.
+
+`for await (const { path, entry } of client.walk("/dir")) {}` lists a tree depth first with attributes. A failed listing throws. `readDirAll(path)` returns one directory as an array.
 
 ## Access control
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "minorVersion": 5,
+  "minorVersion": 6,
   "capabilities": [
     "bulk_io",
     "ls_stat",
@@ -277,7 +277,11 @@
         "EISDIR",
         "ENOTDIR",
         "EINVAL",
-        "ELOOP"
+        "ELOOP",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EDQUOT",
+        "EBUSY"
       ]
     },
     "11": {
@@ -357,7 +361,9 @@
         "EIO",
         "ENOSPC",
         "EFBIG",
-        "EROFS"
+        "EROFS",
+        "EDQUOT",
+        "EBUSY"
       ]
     },
     "14": {
@@ -430,7 +436,9 @@
         "EIO",
         "ENOSPC",
         "EFBIG",
-        "EROFS"
+        "EROFS",
+        "EDQUOT",
+        "EBUSY"
       ]
     },
     "16": {
@@ -538,7 +546,9 @@
         "EINVAL",
         "EIO",
         "EFBIG",
-        "EROFS"
+        "EROFS",
+        "EDQUOT",
+        "EBUSY"
       ]
     },
     "2": {
@@ -577,7 +587,9 @@
         "ENOENT",
         "EACCES",
         "ENOTDIR",
-        "ELOOP"
+        "ELOOP",
+        "ENAMETOOLONG",
+        "ESTALE"
       ]
     },
     "21": {
@@ -604,7 +616,9 @@
       "errors": [
         "ENOENT",
         "EACCES",
-        "ENOTDIR"
+        "ENOTDIR",
+        "ENAMETOOLONG",
+        "ESTALE"
       ]
     },
     "22": {
@@ -656,7 +670,12 @@
         "ENOENT",
         "EACCES",
         "ENOTDIR",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EDQUOT",
+        "EBUSY",
+        "EMLINK"
       ]
     },
     "24": {
@@ -679,7 +698,10 @@
         "ENOTEMPTY",
         "ENOTDIR",
         "EACCES",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EBUSY"
       ]
     },
     "25": {
@@ -701,7 +723,10 @@
         "ENOENT",
         "EISDIR",
         "EACCES",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EBUSY"
       ]
     },
     "26": {
@@ -732,7 +757,11 @@
         "ENOTDIR",
         "EXDEV",
         "EACCES",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EDQUOT",
+        "EBUSY"
       ]
     },
     "27": {
@@ -759,7 +788,11 @@
         "EEXIST",
         "ENOENT",
         "EACCES",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EDQUOT",
+        "EBUSY"
       ]
     },
     "28": {
@@ -785,7 +818,9 @@
       },
       "errors": [
         "ENOENT",
-        "EINVAL"
+        "EINVAL",
+        "ENAMETOOLONG",
+        "ESTALE"
       ]
     },
     "29": {
@@ -813,7 +848,12 @@
         "ENOENT",
         "EPERM",
         "EXDEV",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EDQUOT",
+        "EBUSY",
+        "EMLINK"
       ]
     },
     "30": {
@@ -839,7 +879,10 @@
       "errors": [
         "ENOENT",
         "EPERM",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EBUSY"
       ]
     },
     "31": {
@@ -876,7 +919,10 @@
       "errors": [
         "ENOENT",
         "EPERM",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EBUSY"
       ]
     },
     "32": {
@@ -905,7 +951,11 @@
         "EINVAL",
         "EIO",
         "EFBIG",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EDQUOT",
+        "EBUSY"
       ]
     },
     "33": {
@@ -961,7 +1011,9 @@
       },
       "errors": [
         "ENOENT",
-        "EIO"
+        "EIO",
+        "ENAMETOOLONG",
+        "ESTALE"
       ]
     },
     "34": {
@@ -987,7 +1039,9 @@
       "errors": [
         "ENOENT",
         "EACCES",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE"
       ]
     },
     "40": {
@@ -1014,7 +1068,9 @@
       "errors": [
         "ENOENT",
         "ENOTDIR",
-        "EACCES"
+        "EACCES",
+        "ENAMETOOLONG",
+        "ESTALE"
       ]
     },
     "41": {
@@ -1109,7 +1165,9 @@
         "ENOENT",
         "ENOTDIR",
         "EACCES",
-        "EIO"
+        "EIO",
+        "ENAMETOOLONG",
+        "ESTALE"
       ],
       "capability": "ls_stat"
     },
@@ -1239,7 +1297,9 @@
         "ENOENT",
         "EISDIR",
         "EACCES",
-        "EIO"
+        "EIO",
+        "ENAMETOOLONG",
+        "ESTALE"
       ],
       "capability": "bulk_io"
     },
@@ -1273,7 +1333,11 @@
         "EACCES",
         "EIO",
         "ENOSPC",
-        "EROFS"
+        "EROFS",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EDQUOT",
+        "EBUSY"
       ],
       "capability": "bulk_io"
     },
@@ -1302,7 +1366,10 @@
         "ENOENT",
         "EACCES",
         "EROFS",
-        "EIO"
+        "EIO",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EBUSY"
       ],
       "capability": "remove_all"
     },
@@ -1338,7 +1405,9 @@
       "errors": [
         "ENOENT",
         "ENOTDIR",
-        "EACCES"
+        "EACCES",
+        "ENAMETOOLONG",
+        "ESTALE"
       ],
       "capability": "watch"
     },

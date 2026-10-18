@@ -396,6 +396,12 @@ impl Hub {
     let deadline = Instant::now().checked_add(timeout);
     let mut w = lock(&self.warms);
     loop {
+      if w.closed {
+        return Err(Error::Io(io::Error::new(
+          io::ErrorKind::ConnectionAborted,
+          "client closed",
+        )));
+      }
       match w.done.get(&id) {
         Some(Ok(())) => return Ok(()),
         Some(Err((code, message))) => {
@@ -405,12 +411,6 @@ impl Hub {
           })
         }
         None => {}
-      }
-      if w.closed {
-        return Err(Error::Io(io::Error::new(
-          io::ErrorKind::ConnectionAborted,
-          "client closed",
-        )));
       }
       let left = match deadline {
         Some(d) => d.saturating_duration_since(Instant::now()),

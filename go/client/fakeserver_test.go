@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,6 +45,16 @@ type fakeServer struct {
 	writeSizes []int // ranges per WriteBatch request
 
 	nt fakeNotify // warm ids, watch ids and notice state
+
+	caps       []string                 // capabilities answered in Hello
+	helloCaps  []string                 // capabilities the last Hello asked for
+	stall      atomic.Int32             // Ping requests to leave unanswered
+	delays     map[string]time.Duration // Stat delay per path
+	slowSeen   atomic.Int32             // delayed Stat requests received
+	batchDelay time.Duration            // pause inside each batch request
+	inflight   atomic.Int32             // batch requests being served
+	peak       atomic.Int32             // most batch requests served at once
+	noInode    bool                     // Fstat reports no inode
 
 	// When barrierN > 0, ReadAt blocks until barrierN requests are in flight at once.
 	barrierN int
@@ -181,8 +192,19 @@ func (s *fakeServer) waitBarrier() {
 func (s *fakeServer) handle(f frame.Frame, idx int) (proto.Message, []byte, *wire.WireError) {
 	switch f.Method {
 	case mHello:
-		return &wire.HelloResponse{Version: 1, MaxPayloadBytes: s.maxPayload, MaxInflight: 1}, nil, nil
+		var r wire.HelloRequest
+		proto.Unmarshal(f.Meta, &r)
+		s.mu.Lock()
+		s.helloCaps = r.Capabilities
+		caps := s.caps
+		s.mu.Unlock()
+		return &wire.HelloResponse{Version: 1, MaxPayloadBytes: s.maxPayload, MaxInflight: 1, Capabilities: caps}, nil, nil
 	case mPing:
+		if s.stall.Add(-1) >= 0 {
+			time.Sleep(time.Second)
+			return &wire.Empty{}, nil, nil
+		}
+		s.stall.Store(0)
 		s.mu.Lock()
 		n := s.nt.pingNotice
 		s.mu.Unlock()
@@ -193,6 +215,13 @@ func (s *fakeServer) handle(f frame.Frame, idx int) (proto.Message, []byte, *wir
 	case mStat:
 		var r wire.StatRequest
 		proto.Unmarshal(f.Meta, &r)
+		s.mu.Lock()
+		pause := s.delays[r.Path]
+		s.mu.Unlock()
+		if pause > 0 {
+			s.slowSeen.Add(1)
+			time.Sleep(pause)
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		d, ok := s.files[r.Path]
@@ -236,7 +265,11 @@ func (s *fakeServer) handle(f frame.Frame, idx int) (proto.Message, []byte, *wir
 		if e != nil {
 			return nil, nil, e
 		}
-		return &wire.FstatResponse{Info: &wire.FileInfo{Name: h.path, Size: int64(len(s.files[h.path]))}}, nil, nil
+		info := &wire.FileInfo{Name: h.path, Size: int64(len(s.files[h.path]))}
+		if !s.noInode {
+			info.Inode = uint64(len(h.path)) + 1000
+		}
+		return &wire.FstatResponse{Info: info}, nil, nil
 	case mReadAt:
 		var r wire.ReadAtRequest
 		proto.Unmarshal(f.Meta, &r)
@@ -271,6 +304,13 @@ func (s *fakeServer) handle(f frame.Frame, idx int) (proto.Message, []byte, *wir
 		copy(d[r.Offset:], f.Payload)
 		s.files[h.path] = d
 		return &wire.WriteAtResponse{Count: uint32(len(f.Payload))}, nil, nil
+	}
+	if f.Method == mStatBatch || f.Method == mReadBatch || f.Method == mWriteBatch {
+		n := s.inflight.Add(1)
+		defer s.inflight.Add(-1)
+		for old := s.peak.Load(); n > old && !s.peak.CompareAndSwap(old, n); old = s.peak.Load() {
+		}
+		time.Sleep(s.batchDelay)
 	}
 	if resp, data, werr, ok := s.handleBulk(f, idx); ok {
 		return resp, data, werr
@@ -411,7 +451,11 @@ func (s *fakeServer) handleNS(f frame.Frame, idx int) (proto.Message, []byte, *w
 		end := min(len(names), pos+int(r.MaxEntries))
 		out := &wire.LsResponse{}
 		for _, n := range names[pos:end] {
-			out.Entries = append(out.Entries, &wire.DirEntry{Name: n, Info: &wire.FileInfo{Name: n, Size: int64(len(s.files[r.Path+"/"+n]))}})
+			e := &wire.DirEntry{Name: n, Info: &wire.FileInfo{Name: n, Size: int64(len(s.files[r.Path+"/"+n]))}}
+			if _, isDir := s.dirs[r.Path+"/"+n]; isDir {
+				e.Type, e.Info.Type = wire.FileType_FILE_TYPE_DIRECTORY, wire.FileType_FILE_TYPE_DIRECTORY
+			}
+			out.Entries = append(out.Entries, e)
 		}
 		if end < len(names) {
 			out.NextCursor = fmt.Sprintf("c%d", end)
@@ -550,7 +594,7 @@ func (s *fakeServer) handleBulk(f frame.Frame, idx int) (resp proto.Message, dat
 		if r.MaxBytes > 0 && int(r.MaxBytes) < n {
 			n = int(r.MaxBytes)
 		}
-		out := d[:min(len(d), n)]
+		out := append([]byte(nil), d[:min(len(d), n)]...)
 		return &wire.ReadFileResponse{Count: uint32(len(out))}, out, nil, true
 	case mWriteFile:
 		var r wire.WriteFileRequest

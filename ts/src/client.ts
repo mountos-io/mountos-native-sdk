@@ -1,13 +1,14 @@
 import { itemErrors, MAX_BATCH_ITEMS, planPieces, ReadRange, ReadResult, StatResult, WriteItem, WriteResult } from "./bulk.js";
 import { Conn } from "./conn.js";
-import { MountosError, ProtocolError, TransportError } from "./errors.js";
+import { DeadlineExceededError, MountosError, ProtocolError, TransportError } from "./errors.js";
 import { Frame, MAX_PAYLOAD_BYTES } from "./frame.js";
 import * as pb from "./gen/mountos_fs.js";
 import {
-  dec, DirEntry, enc, FileInfo, HelloResponse, OpenFlag,
+  dec, DirEntry, enc, FileInfo, FileType, HelloResponse, OpenFlag,
   decHello, toDirEntry, toFileInfo,
 } from "./api.js";
 import { ClientOps, FileOps, Method } from "./ops_gen.js";
+import { requireCapability } from "./capability.js";
 import { ClientEvent, decodeNotice, describeEvent, Logger } from "./events.js";
 import { Watch, WatchOptions } from "./watch.js";
 
@@ -20,6 +21,18 @@ export interface ClientOptions {
    * thrown by listeners. Default is the console, which writes to stderr.
    */
   logger?: Logger;
+  /**
+   * Limit in ms for every request and for the wait for a free connection. Default 0 means none.
+   * A request that times out ends its connection, which is dialed again on a later call, and the
+   * call fails with DeadlineExceededError.
+   */
+  callTimeout?: number;
+}
+
+/** One entry found by Client.walk. path is the full path of the entry. */
+export interface WalkEntry {
+  path: string;
+  entry: DirEntry;
 }
 
 export interface WaitWarmOptions {
@@ -36,6 +49,13 @@ interface Slot {
   conn: Conn;
   /** Set while a replacement dial runs, so concurrent callers share it. */
   dialing?: Promise<Conn>;
+}
+
+/** A call that waits for a free connection. */
+interface ConnWaiter {
+  resolve: (c: Conn) => void;
+  reject: (e: Error) => void;
+  timer?: NodeJS.Timeout;
 }
 
 interface WarmWaiter {
@@ -57,6 +77,7 @@ export class Client extends ClientOps {
   private warmDone = new Map<bigint, Error | undefined>();
 
   private slots: Slot[];
+  private connWaiters: ConnWaiter[] = [];
 
   private constructor(
     conns: Conn[],
@@ -64,6 +85,7 @@ export class Client extends ClientOps {
     private path: string,
     private clientName: string,
     private hello: HelloResponse,
+    private callTimeout: number,
   ) {
     super();
     this.slots = conns.map((conn) => ({ conn }));
@@ -73,15 +95,18 @@ export class Client extends ClientOps {
   private adopt(c: Conn): void {
     c.onNotice = (f) => this.onNotice(c, f);
     c.onClosed = (err, byClient) => this.onConnClosed(c, err, byClient);
+    c.onIdle = () => this.drain();
   }
 
   static async connect(socketPath: string, opts: ClientOptions = {}): Promise<Client> {
     const size = opts.poolSize ?? 4;
     if (!Number.isInteger(size) || size < 1) throw new RangeError("poolSize must be >= 1");
     const name = opts.clientName ?? "mountos-ts";
+    const timeout = opts.callTimeout ?? 0;
+    if (!Number.isFinite(timeout) || timeout < 0) throw new RangeError("callTimeout must be >= 0");
     const results = await Promise.allSettled(
       Array.from({ length: size }, async () => {
-        const c = await Conn.connect(socketPath);
+        const c = await Conn.connect(socketPath, timeout);
         try {
           const hello = await handshake(c, name);
           return { c, hello };
@@ -98,7 +123,7 @@ export class Client extends ClientOps {
       throw (bad as PromiseRejectedResult).reason;
     }
     const hello = ok[0].value.hello;
-    return new Client(ok.map((r) => r.value.c), opts.logger ?? console, socketPath, name, hello);
+    return new Client(ok.map((r) => r.value.c), opts.logger ?? console, socketPath, name, hello, timeout);
   }
 
   /** Result of the latest Hello handshake. */
@@ -122,6 +147,10 @@ export class Client extends ClientOps {
     this.warmWaiters.clear();
     this.warmDone.clear();
     this.listeners.clear();
+    for (const w of this.connWaiters.splice(0)) {
+      clearTimeout(w.timer);
+      w.reject(err);
+    }
   }
 
   /**
@@ -140,7 +169,7 @@ export class Client extends ClientOps {
   private redial(sl: Slot): Promise<Conn> {
     if (sl.dialing) return sl.dialing;
     const p = (async (): Promise<Conn> => {
-      const c = await Conn.connect(this.path);
+      const c = await Conn.connect(this.path, this.callTimeout);
       let hello: HelloResponse;
       try {
         hello = await handshake(c, this.clientName);
@@ -161,42 +190,107 @@ export class Client extends ClientOps {
     const done = (): void => {
       if (sl.dialing === p) sl.dialing = undefined;
     };
-    p.then(done, done);
+    p.then(() => {
+      done();
+      this.drain();
+    }, done);
     return p;
   }
 
-  // Least loaded live connection. The cursor rotates the scan start so ties spread out.
+  // Hands a connection to the caller with a reservation that the caller releases with unreserve.
+  // A free live connection is used first, so a call never queues behind a busy one while another
+  // is idle. When every live connection is busy the call waits for the first one that frees up.
   // Dead slots are redialed on the call that finds them. When no connection is live the call
   // waits for the first redial to finish, and a failed dial surfaces as a transport error.
-  private async pick(): Promise<Conn> {
+  private async acquire(): Promise<Conn> {
     if (this.closed) throw new TransportError("client closed");
     const n = this.slots.length;
-    let best: Conn | undefined;
+    let free: Conn | undefined;
+    let live = 0;
     const dead: Slot[] = [];
     for (let i = 0; i < n; i++) {
       const sl = this.slots[(this.cursor + i) % n];
-      if (sl.conn.alive) {
-        if (!best || sl.conn.load < best.load) best = sl.conn;
-      } else {
+      if (!sl.conn.alive) {
         dead.push(sl);
+        continue;
       }
+      live++;
+      if (!free && sl.conn.load === 0) free = sl.conn;
     }
     this.cursor = (this.cursor + 1) % n;
     const dials = dead.map((sl) => this.redial(sl));
-    if (best) {
+    if (live > 0) {
       for (const d of dials) d.catch(noop);
-      return best;
+      if (free) {
+        free.reserve();
+        return free;
+      }
+      return this.waitFree();
     }
     try {
-      return await Promise.any(dials);
+      const c = await Promise.any(dials);
+      c.reserve();
+      return c;
     } catch (e) {
       if (e instanceof AggregateError) throw e.errors[0];
       throw e;
     }
   }
 
+  private waitFree(): Promise<Conn> {
+    return new Promise<Conn>((resolve, reject) => {
+      const w: ConnWaiter = { resolve, reject };
+      if (this.callTimeout > 0) {
+        w.timer = setTimeout(() => {
+          this.connWaiters.splice(this.connWaiters.indexOf(w), 1);
+          reject(new DeadlineExceededError(`no free connection within ${this.callTimeout} ms`));
+        }, this.callTimeout);
+      }
+      this.connWaiters.push(w);
+    });
+  }
+
+  // Serves waiting calls in order with connections that have no load.
+  private drain(): void {
+    while (this.connWaiters.length > 0) {
+      const sl = this.slots.find((x) => x.conn.alive && x.conn.load === 0);
+      if (!sl) return;
+      const w = this.connWaiters.shift()!;
+      clearTimeout(w.timer);
+      sl.conn.reserve();
+      w.resolve(sl.conn);
+    }
+  }
+
+  // When the last live connection ends, waiting calls get a redialed one or the dial error.
+  private reviveWaiters(): void {
+    if (this.connWaiters.length === 0 || this.slots.some((sl) => sl.conn.alive)) return;
+    Promise.any(this.slots.map((sl) => this.redial(sl))).catch((e) => {
+      const err = e instanceof AggregateError ? e.errors[0] : e;
+      for (const w of this.connWaiters.splice(0)) {
+        clearTimeout(w.timer);
+        w.reject(err);
+      }
+    });
+  }
+
+  private async lease<T>(fn: (c: Conn) => Promise<T>): Promise<T> {
+    const c = await this.acquire();
+    try {
+      return await fn(c);
+    } finally {
+      c.unreserve();
+    }
+  }
+
+  // Fails a call locally when the server reported capabilities and this method is not among them.
+  private need(method: number): void {
+    requireCapability(this.hello.capabilities, method);
+  }
+
   protected async call(method: number, meta: Buffer): Promise<Buffer> {
-    return (await (await this.pick()).call(method, meta)).meta;
+    this.need(method);
+    return this.lease(async (c) => (await c.call(method, meta)).meta);
   }
 
   private onNotice(conn: Conn, f: Frame): void {
@@ -211,6 +305,7 @@ export class Client extends ClientOps {
 
   private onConnClosed(conn: Conn, err: Error, byClient: boolean): void {
     if (this.closed || byClient) return;
+    this.reviveWaiters();
     if (!conn.closingSeen) {
       const e: ClientEvent = {
         kind: "connectionLost", sequence: 0n, refId: 0n, path: "", oldPath: "", error: err, time: new Date(),
@@ -287,7 +382,8 @@ export class Client extends ClientOps {
    * fills the limit may be longer, so the rest is read from an opened file in payload-sized reads.
    */
   async readFile(path: string): Promise<Buffer> {
-    const r = await (await this.pick()).call(Method.ReadFile, enc(pb.ReadFileRequest, { path, maxBytes: 0n }));
+    this.need(Method.ReadFile);
+    const r = await this.lease((c) => c.call(Method.ReadFile, enc(pb.ReadFileRequest, { path, maxBytes: 0n })));
     const count = dec(pb.ReadFileResponse, r.meta).count;
     if (count !== r.payload.length) {
       throw new ProtocolError(`ReadFile count ${count} does not match payload ${r.payload.length}`);
@@ -318,7 +414,8 @@ export class Client extends ClientOps {
     const buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
     let written: number;
     if (buf.length <= this.maxPayload) {
-      const r = await (await this.pick()).call(Method.WriteFile, enc(pb.WriteFileRequest, { path, truncate }), buf);
+      this.need(Method.WriteFile);
+      const r = await this.lease((c) => c.call(Method.WriteFile, enc(pb.WriteFileRequest, { path, truncate }), buf));
       written = dec(pb.WriteFileResponse, r.meta).count;
     } else {
       const f = await this.open(path, OpenFlag.WriteOnly | OpenFlag.Create | (truncate ? OpenFlag.Trunc : 0));
@@ -373,15 +470,15 @@ export class Client extends ClientOps {
    * connection ends. Change events reach every listener and the returned Watch.
    */
   async watch(path: string, opts: WatchOptions = {}): Promise<Watch> {
-    const conn = await this.pick();
+    this.need(Method.Watch);
     const req = enc(pb.WatchRequest, { path, recursive: opts.recursive ?? false, sinceSequence: opts.since ?? 0n });
     let w: Watch | undefined;
     // Registered while the response is read, so a change that follows it in the same chunk is kept.
-    await conn.call(Method.Watch, req, undefined, (f) => {
+    await this.lease((conn) => conn.call(Method.Watch, req, undefined, (f) => {
       const id = dec(pb.WatchResponse, f.meta).watchId;
       w = new Watch(id, conn, (x) => this.watches.delete(x));
       this.watches.add(w);
-    });
+    }));
     if (this.closed) {
       w!.end();
       throw new TransportError("client closed");
@@ -408,17 +505,49 @@ export class Client extends ClientOps {
 
   /** Opens a directory. The handle stays bound to the connection that opened it. */
   async opendir(path: string): Promise<Dir> {
-    const conn = await this.pick();
-    const resp = await conn.call(Method.Opendir, enc(pb.OpendirRequest, { path }));
-    return new Dir(conn, dec(pb.OpendirResponse, resp.meta).handle);
+    return this.lease(async (conn) => {
+      const resp = await conn.call(Method.Opendir, enc(pb.OpendirRequest, { path }));
+      return new Dir(conn, dec(pb.OpendirResponse, resp.meta).handle);
+    });
+  }
+
+  /** Lists a whole directory with attributes, reading every page. */
+  async readDirAll(path: string): Promise<DirEntry[]> {
+    const all: DirEntry[] = [];
+    let cursor = "";
+    do {
+      const page = await this.ls(path, 0, cursor);
+      all.push(...page.entries);
+      cursor = page.nextCursor;
+    } while (cursor !== "");
+    return all;
+  }
+
+  /**
+   * Walks a directory tree depth first, parents before their children. Each entry carries its
+   * attributes. Symlinks are reported and not followed. A failed listing throws, so nothing is
+   * skipped silently. Leaving the loop early stops the walk.
+   */
+  async *walk(path: string): AsyncGenerator<WalkEntry, void, undefined> {
+    let cursor = "";
+    do {
+      const page = await this.ls(path, 0, cursor);
+      for (const entry of page.entries) {
+        const full = path.endsWith("/") ? path + entry.name : `${path}/${entry.name}`;
+        yield { path: full, entry };
+        if (entry.type === FileType.Directory) yield* this.walk(full);
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== "");
   }
 
   /** Opens a file. The handle stays bound to the connection that opened it. */
   async open(path: string, flags: number = OpenFlag.ReadOnly, mode = 0o644): Promise<FileHandle> {
     if ((flags & 3) === 3) throw new MountosError("EINVAL", "invalid access mode");
-    const conn = await this.pick();
-    const resp = await conn.call(Method.Open, enc(pb.OpenRequest, { path, flags, mode }));
-    return new FileHandle(conn, dec(pb.OpenResponse, resp.meta).handle, this.maxPayload);
+    return this.lease(async (conn) => {
+      const resp = await conn.call(Method.Open, enc(pb.OpenRequest, { path, flags, mode }));
+      return new FileHandle(conn, dec(pb.OpenResponse, resp.meta).handle, this.maxPayload, (m) => this.need(m));
+    });
   }
 }
 
@@ -440,6 +569,7 @@ export class FileHandle extends FileOps {
     /** Server handle. Valid only on the connection that opened it. */
     readonly id: bigint,
     private chunk: number,
+    private need: (method: number) => void,
   ) {
     super();
   }
@@ -484,6 +614,7 @@ export class FileHandle extends FileOps {
    */
   readBatch(ranges: ReadRange[]): Promise<ReadResult[]> {
     return this.op(async () => {
+      this.need(Method.ReadBatch);
       const groups = planPieces(ranges, this.chunk);
       const st = ranges.map(() => ({ parts: [] as Buffer[], short: false, error: undefined as MountosError | undefined }));
       for (const group of groups) {
@@ -528,6 +659,7 @@ export class FileHandle extends FileOps {
    */
   writeBatch(items: WriteItem[]): Promise<WriteResult[]> {
     return this.op(async () => {
+      this.need(Method.WriteBatch);
       const groups = planPieces(items.map((it) => ({ offset: it.offset, length: it.data.byteLength })), this.chunk);
       const st = items.map(() => ({ written: 0, short: false, error: undefined as MountosError | undefined }));
       for (const group of groups) {

@@ -5,15 +5,17 @@ use crate::file::File;
 use crate::frame::{self, Frame, FLAG_ERROR, FLAG_NOTIFY, FLAG_RESPONSE, MAX_PAYLOAD_BYTES};
 use crate::wire::*;
 use prost::Message;
+use std::collections::HashSet;
 use std::fmt;
 use std::io;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 /// Client settings.
 #[derive(Clone)]
@@ -25,6 +27,12 @@ pub struct Options {
   /// The line has no prefix and no newline. When `None`, lines go to stderr with the prefix
   /// "mountos: ". Pass your own function to route them elsewhere.
   pub logger: Option<Logger>,
+  /// Longest a single request may take, from the first byte sent to the reply. `Duration::ZERO`
+  /// (the default) means no limit. A call that runs over fails with `Error::Timeout` and its
+  /// connection is dropped and dialed again on the next call, so a late reply cannot reach
+  /// another call. Files and watches on that connection are gone. A call that sends several
+  /// requests (a large read or write) gets the limit for each request.
+  pub call_timeout: Duration,
 }
 
 /// Alias of `Options`.
@@ -36,6 +44,7 @@ impl Default for Options {
       pool_size: 4,
       client_name: concat!("mountos-native-rust/", env!("CARGO_PKG_VERSION")).into(),
       logger: None,
+      call_timeout: Duration::ZERO,
     }
   }
 }
@@ -46,6 +55,7 @@ impl fmt::Debug for Options {
       .field("pool_size", &self.pool_size)
       .field("client_name", &self.client_name)
       .field("logger", &self.logger.as_ref().map(|_| "<fn>"))
+      .field("call_timeout", &self.call_timeout)
       .finish()
   }
 }
@@ -58,6 +68,30 @@ fn aborted(msg: &str) -> Error {
 fn join_other(h: JoinHandle<()>) {
   if h.thread().id() != std::thread::current().id() {
     let _ = h.join();
+  }
+}
+
+/// Capability the server must report for a method, if any.
+fn required_capability(m: u16) -> Option<&'static str> {
+  match m {
+    method::LS => Some("ls_stat"),
+    method::STAT_BATCH | method::READ_BATCH | method::WRITE_BATCH | method::READ_FILE | method::WRITE_FILE => {
+      Some("bulk_io")
+    }
+    method::REMOVE_ALL => Some("remove_all"),
+    method::WATCH => Some("watch"),
+    method::WARM_OPEN | method::WARM_READ => Some("warm"),
+    _ => None,
+  }
+}
+
+/// Turns a socket write that hit the send timeout into `Error::Timeout`.
+fn write_timeout(e: Error) -> Error {
+  match e {
+    Error::Io(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
+      Error::Timeout(format!("send: {e}"))
+    }
+    e => e,
   }
 }
 
@@ -98,11 +132,19 @@ pub(crate) struct Conn {
   pub(crate) next_id: u64,
   /// Largest payload per frame, from the Hello reply.
   pub(crate) max_payload: usize,
+  /// Per-request limit, zero for none.
+  timeout: Duration,
+  /// Capabilities the server reported. `None` when it reported none (an older server), which
+  /// allows every call.
+  caps: Option<HashSet<String>>,
 }
 
 impl Conn {
-  pub(crate) fn connect(path: &Path, name: &str, hub: &Arc<Hub>) -> Result<Conn> {
+  pub(crate) fn connect(path: &Path, name: &str, hub: &Arc<Hub>, timeout: Duration) -> Result<Conn> {
     let stream = UnixStream::connect(path)?;
+    if !timeout.is_zero() {
+      stream.set_write_timeout(Some(timeout))?;
+    }
     let shared = Arc::new(ConnShared {
       id: CONN_SEQ.fetch_add(1, Ordering::SeqCst),
       closing: AtomicBool::new(false),
@@ -128,6 +170,8 @@ impl Conn {
       reader: Some(reader),
       next_id: 0,
       max_payload: MAX_PAYLOAD_BYTES as usize,
+      timeout,
+      caps: None,
     };
     let req = HelloRequest {
       client_name: name.into(),
@@ -142,6 +186,9 @@ impl Conn {
     if resp.max_payload_bytes > 0 {
       c.max_payload = c.max_payload.min(resp.max_payload_bytes as usize);
     }
+    if !resp.capabilities.is_empty() {
+      c.caps = Some(resp.capabilities.into_iter().collect());
+    }
     Ok(c)
   }
 
@@ -149,20 +196,37 @@ impl Conn {
     self.shared.dead.load(Ordering::SeqCst)
   }
 
-  /// Sends one request and waits for its response frame.
+  /// Sends one request and waits for its response frame. The sizes and the capability are
+  /// checked before anything is sent, so those failures leave the connection intact.
   fn call(&mut self, method: u16, req: &impl Message, payload: &[u8]) -> Result<Frame> {
+    if let Some(cap) = required_capability(method) {
+      if self.caps.as_ref().is_some_and(|c| !c.contains(cap)) {
+        return Err(Error::server(
+          "UNSUPPORTED_OPERATION",
+          &format!("the server does not report capability {cap}"),
+        ));
+      }
+    }
+    let meta = req.encode_to_vec();
+    frame::check_limits(meta.len(), payload.len())?;
     self.next_id += 1;
     let id = self.next_id;
-    let f = Frame {
-      flags: 0,
-      method,
-      request_id: id,
-      meta: req.encode_to_vec(),
-      payload: payload.to_vec(),
-    };
     *lock(&self.shared.pending_reply) = Some((id, method));
-    frame::write(&mut self.stream, &f)?;
-    let resp = self.rx.recv().map_err(|_| aborted("server closed the connection"))??;
+    frame::write_parts(&mut self.stream, 0, method, id, &meta, payload).map_err(write_timeout)?;
+    let resp = if self.timeout.is_zero() {
+      self.rx.recv().map_err(|_| aborted("server closed the connection"))??
+    } else {
+      match self.rx.recv_timeout(self.timeout) {
+        Ok(r) => r?,
+        Err(RecvTimeoutError::Timeout) => {
+          return Err(Error::Timeout(format!(
+            "method {method} did not finish within {:?}",
+            self.timeout
+          )))
+        }
+        Err(RecvTimeoutError::Disconnected) => return Err(aborted("server closed the connection")),
+      }
+    };
     if resp.flags & FLAG_RESPONSE == 0 || resp.request_id != id || resp.method != method {
       return Err(Error::Protocol(format!(
         "unexpected frame: method {} id {}",
@@ -267,11 +331,90 @@ struct SlotState {
   epoch: u64,
 }
 
-/// A lazily connected pool entry. Holding its lock is what serializes requests on the connection.
+/// Wakes callers that wait for a free connection. Every release bumps the generation, so a
+/// waiter that read the generation before it scanned the pool cannot miss a release.
+#[derive(Default)]
+pub(crate) struct Gate {
+  generation: Mutex<u64>,
+  cv: Condvar,
+  /// Callers that found every connection busy and wait for the first to free.
+  waiting: AtomicUsize,
+}
+
+/// Marks a caller as waiting for any free connection until dropped.
+struct Waiting<'a>(&'a Gate);
+
+impl Drop for Waiting<'_> {
+  fn drop(&mut self) {
+    self.0.waiting.fetch_sub(1, Ordering::SeqCst);
+    self.0.bump();
+  }
+}
+
+impl Gate {
+  fn generation(&self) -> u64 {
+    *lock(&self.generation)
+  }
+
+  fn bump(&self) {
+    *lock(&self.generation) += 1;
+    self.cv.notify_all();
+  }
+
+  fn wait_change(&self, seen: u64) {
+    let mut g = lock(&self.generation);
+    while *g == seen {
+      g = self.cv.wait(g).unwrap_or_else(|e| e.into_inner());
+    }
+  }
+
+  fn wait_for_free(&self) -> Waiting<'_> {
+    self.waiting.fetch_add(1, Ordering::SeqCst);
+    Waiting(self)
+  }
+
+  /// Holds back a caller bound to one connection while others wait for any free one, so a long
+  /// operation that goes request after request cannot starve a small call.
+  fn let_waiters_pass(&self) {
+    loop {
+      let seen = self.generation();
+      if self.waiting.load(Ordering::SeqCst) == 0 {
+        return;
+      }
+      self.wait_change(seen);
+    }
+  }
+}
+
+/// Fair queue for one connection. Callers are served in arrival order, so a caller that runs
+/// request after request cannot starve one that waits. Holds (next ticket, ticket served).
+#[derive(Default)]
+struct Turnstile {
+  tickets: Mutex<(u64, u64)>,
+  cv: Condvar,
+}
+
+/// Held while a request owns the connection. Dropping it serves the next caller and wakes the
+/// callers that wait for any free connection.
+struct Turn<'a>(&'a Slot);
+
+impl Drop for Turn<'_> {
+  fn drop(&mut self) {
+    lock(&self.0.queue.tickets).1 += 1;
+    self.0.queue.cv.notify_all();
+    self.0.gate.bump();
+  }
+}
+
+/// A lazily connected pool entry. A request owns it for one round trip only, never across the
+/// chunks of a large operation.
 pub(crate) struct Slot {
   path: PathBuf,
   name: String,
+  timeout: Duration,
   hub: Arc<Hub>,
+  gate: Arc<Gate>,
+  queue: Turnstile,
   closed: AtomicBool,
   /// The current connection, reachable without the state lock so `close` can cut a call in flight.
   live: Mutex<Option<Arc<ConnShared>>>,
@@ -279,10 +422,38 @@ pub(crate) struct Slot {
 }
 
 impl Slot {
-  /// Runs `f` on the connection. With `want`, fails if the connection is not the one with that epoch.
-  /// A broken connection is dropped so the next call reconnects.
+  /// Runs `f` on the connection, waiting for its turn. With `want`, fails if the connection is
+  /// not the one with that epoch. A broken connection is dropped so the next call reconnects.
   pub(crate) fn run<T>(&self, want: Option<u64>, f: impl FnOnce(&mut Conn) -> Result<T>) -> Result<(T, u64)> {
+    self.gate.let_waiters_pass();
+    let mut q = lock(&self.queue.tickets);
+    let ticket = q.0;
+    q.0 += 1;
+    while q.1 != ticket {
+      q = self.queue.cv.wait(q).unwrap_or_else(|e| e.into_inner());
+    }
+    drop(q);
+    self.run_entered(want, f)
+  }
+
+  /// Takes a turn only when nobody holds or awaits the connection.
+  fn try_enter(&self) -> bool {
+    let mut q = lock(&self.queue.tickets);
+    if q.0 != q.1 {
+      return false;
+    }
+    q.0 += 1;
+    true
+  }
+
+  /// Runs `f` for a caller that already holds a turn and releases it at the end.
+  fn run_entered<T>(&self, want: Option<u64>, f: impl FnOnce(&mut Conn) -> Result<T>) -> Result<(T, u64)> {
+    let _turn = Turn(self);
     let mut st = lock(&self.state);
+    self.exec(&mut st, want, f)
+  }
+
+  fn exec<T>(&self, st: &mut SlotState, want: Option<u64>, f: impl FnOnce(&mut Conn) -> Result<T>) -> Result<(T, u64)> {
     if self.closed.load(Ordering::SeqCst) {
       return Err(aborted("client closed"));
     }
@@ -292,7 +463,7 @@ impl Slot {
     }
     if !alive {
       st.conn = None;
-      let c = Conn::connect(&self.path, &self.name, &self.hub)?;
+      let c = Conn::connect(&self.path, &self.name, &self.hub, self.timeout)?;
       *lock(&self.live) = Some(c.shared.clone());
       if self.closed.load(Ordering::SeqCst) {
         return Err(aborted("client closed"));
@@ -302,14 +473,10 @@ impl Slot {
     }
     let epoch = st.epoch;
     let r = f(st.conn.as_mut().expect("connected above"));
-    if matches!(r, Err(Error::Io(_)) | Err(Error::Protocol(_))) {
+    if matches!(r, Err(Error::Io(_)) | Err(Error::Protocol(_)) | Err(Error::Timeout(_))) {
       st.conn = None;
     }
     r.map(|v| (v, epoch))
-  }
-
-  fn is_idle(&self) -> bool {
-    self.state.try_lock().is_ok()
   }
 
   /// Refuses new calls and cuts the connection, which ends a call in flight.
@@ -318,6 +485,7 @@ impl Slot {
     if let Some(cs) = lock(&self.live).as_ref() {
       cs.kill();
     }
+    self.gate.bump();
   }
 
   /// Drops the connection, which stops its reader.
@@ -328,6 +496,7 @@ impl Slot {
 
 pub(crate) struct Inner {
   slots: Vec<Arc<Slot>>,
+  gate: Arc<Gate>,
   next: AtomicUsize,
   pub(crate) hub: Arc<Hub>,
   dispatcher: Mutex<Option<JoinHandle<()>>>,
@@ -375,12 +544,16 @@ impl Client {
   pub fn connect_with(path: impl AsRef<Path>, opts: Options) -> Result<Client> {
     let n = opts.pool_size.max(1);
     let hub = Arc::new(Hub::new(opts.logger.clone()));
+    let gate = Arc::new(Gate::default());
     let slots: Vec<_> = (0..n)
       .map(|_| {
         Arc::new(Slot {
           path: path.as_ref().to_path_buf(),
           name: opts.client_name.clone(),
+          timeout: opts.call_timeout,
           hub: hub.clone(),
+          gate: gate.clone(),
+          queue: Turnstile::default(),
           closed: AtomicBool::new(false),
           live: Mutex::new(None),
           state: Mutex::new(SlotState { conn: None, epoch: 0 }),
@@ -396,6 +569,7 @@ impl Client {
       })?;
     let inner = Inner {
       slots,
+      gate,
       next: AtomicUsize::new(0),
       hub,
       dispatcher: Mutex::new(Some(dispatcher)),
@@ -411,26 +585,44 @@ impl Client {
     self.inner.shutdown();
   }
 
-  /// Picks an idle connection, rotating the start so consecutive opens spread out.
-  /// When all are busy it waits on the rotated one.
-  pub(crate) fn pick(&self) -> &Arc<Slot> {
-    let slots = &self.inner.slots;
-    let n = slots.len();
-    let start = self.inner.next.fetch_add(1, Ordering::Relaxed) % n;
-    (0..n)
-      .map(|i| &slots[(start + i) % n])
-      .find(|s| s.is_idle())
-      .unwrap_or(&slots[start])
+  pub(crate) fn pool_size(&self) -> usize {
+    self.inner.slots.len()
+  }
+
+  /// Runs `f` on the first connection that is free, starting the scan at a rotating position so
+  /// consecutive calls spread out. When all are busy it waits for whichever frees first. Returns
+  /// the slot and epoch the call ran on, for callers that bind a handle to it.
+  pub(crate) fn run_any<T>(&self, f: impl FnOnce(&mut Conn) -> Result<T>) -> Result<(T, &Arc<Slot>, u64)> {
+    let inner = &*self.inner;
+    let n = inner.slots.len();
+    let mut waiter = None;
+    loop {
+      let seen = inner.gate.generation();
+      let start = inner.next.fetch_add(1, Ordering::Relaxed) % n;
+      for i in 0..n {
+        let slot = &inner.slots[(start + i) % n];
+        if slot.try_enter() {
+          drop(waiter);
+          let (v, epoch) = slot.run_entered(None, f)?;
+          return Ok((v, slot, epoch));
+        }
+      }
+      if waiter.is_none() {
+        // Register, then scan once more: a connection may have freed in between.
+        waiter = Some(inner.gate.wait_for_free());
+        continue;
+      }
+      inner.gate.wait_change(seen);
+    }
   }
 
   pub(crate) fn unary<R: Message + Default>(&self, m: u16, req: &impl Message) -> Result<R> {
-    Ok(self.pick().run(None, |c| c.call_msg::<R>(m, req, &[]))?.0 .0)
+    Ok(self.run_any(|c| c.call_msg::<R>(m, req, &[]))?.0 .0)
   }
 
   /// Opens a file. `flags` combine `open_flag` values. The file stays bound to the connection that opened it.
   pub fn open(&self, path: &str, flags: u32, mode: u32) -> Result<File> {
-    let slot = self.pick();
-    let ((r, _), epoch) = slot.run(None, |c| {
+    let ((r, _), slot, epoch) = self.run_any(|c| {
       c.call_msg::<OpenResponse>(
         method::OPEN,
         &OpenRequest {
@@ -462,10 +654,8 @@ impl Client {
 
   /// Opens a directory for paged listing. The directory stays bound to the connection that opened it.
   pub fn opendir(&self, path: &str) -> Result<Dir> {
-    let slot = self.pick();
-    let ((r, _), epoch) = slot.run(None, |c| {
-      c.call_msg::<OpendirResponse>(method::OPENDIR, &OpendirRequest { path: path.into() }, &[])
-    })?;
+    let ((r, _), slot, epoch) =
+      self.run_any(|c| c.call_msg::<OpendirResponse>(method::OPENDIR, &OpendirRequest { path: path.into() }, &[]))?;
     Ok(Dir::new(slot.clone(), r.handle, epoch))
   }
 

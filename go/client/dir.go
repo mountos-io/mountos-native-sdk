@@ -49,8 +49,8 @@ func (d *Dir) do(method uint16, req, resp proto.Message) error {
 	if d.cl.isClosed() {
 		return ErrClientClosed
 	}
-	d.c.mu.Lock()
-	defer d.c.mu.Unlock()
+	d.c.lock()
+	defer d.c.unlock()
 	if !d.c.alive() || d.c.gen != d.gen {
 		return ErrConnLost
 	}

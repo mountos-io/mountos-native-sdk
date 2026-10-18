@@ -30,7 +30,7 @@
 
 api: mountos.filesystem
 version: 1
-minorVersion: 5
+minorVersion: 6
 
 endpoint:
   # One socket per mount: <home>/.mountOS/sockets/mountos_api_<hash>.sock, where <hash> is the
@@ -173,7 +173,7 @@ operations:
       mode: {id: 3, type: uint32}
     response:
       handle: {id: 1, type: uint64, required: true}
-    errors: [ENOENT, EACCES, EEXIST, EISDIR, ENOTDIR, EINVAL, ELOOP]
+    errors: [ENOENT, EACCES, EEXIST, EISDIR, ENOTDIR, EINVAL, ELOOP, ENAMETOOLONG, ESTALE, EDQUOT, EBUSY]
 
   - name: Close
     id: 11
@@ -200,7 +200,7 @@ operations:
       handle: {id: 1, type: uint64, required: true}
     response:
       count: {id: 1, type: uint32, required: true}
-    errors: [EBADF, EIO, ENOSPC, EFBIG, EROFS]
+    errors: [EBADF, EIO, ENOSPC, EFBIG, EROFS, EDQUOT, EBUSY]
 
   - name: ReadAt
     id: 14
@@ -221,7 +221,7 @@ operations:
       offset: {id: 2, type: int64, required: true}
     response:
       count: {id: 1, type: uint32, required: true}
-    errors: [EBADF, EINVAL, EIO, ENOSPC, EFBIG, EROFS]
+    errors: [EBADF, EINVAL, EIO, ENOSPC, EFBIG, EROFS, EDQUOT, EBUSY]
 
   - name: Seek
     id: 16
@@ -258,7 +258,7 @@ operations:
       handle: {id: 1, type: uint64, required: true}
       size: {id: 2, type: int64, required: true}
     response: Empty
-    errors: [EBADF, EINVAL, EIO, EFBIG, EROFS]
+    errors: [EBADF, EINVAL, EIO, EFBIG, EROFS, EDQUOT, EBUSY]
 
   # Path metadata and namespace
   - name: Stat
@@ -268,7 +268,7 @@ operations:
       path: {id: 1, type: string, required: true}
     response:
       info: {id: 1, type: FileInfo, required: true}
-    errors: [ENOENT, EACCES, ENOTDIR, ELOOP]
+    errors: [ENOENT, EACCES, ENOTDIR, ELOOP, ENAMETOOLONG, ESTALE]
 
   - name: Lstat
     id: 21
@@ -277,7 +277,7 @@ operations:
       path: {id: 1, type: string, required: true}
     response:
       info: {id: 1, type: FileInfo, required: true}
-    errors: [ENOENT, EACCES, ENOTDIR]
+    errors: [ENOENT, EACCES, ENOTDIR, ENAMETOOLONG, ESTALE]
 
   - name: Fstat
     id: 22
@@ -295,7 +295,7 @@ operations:
       path: {id: 1, type: string, required: true}
       mode: {id: 2, type: uint32}
     response: Empty
-    errors: [EEXIST, ENOENT, EACCES, ENOTDIR, EROFS]
+    errors: [EEXIST, ENOENT, EACCES, ENOTDIR, EROFS, ENAMETOOLONG, ESTALE, EDQUOT, EBUSY, EMLINK]
 
   - name: Rmdir
     id: 24
@@ -303,7 +303,7 @@ operations:
     request:
       path: {id: 1, type: string, required: true}
     response: Empty
-    errors: [ENOENT, ENOTEMPTY, ENOTDIR, EACCES, EROFS]
+    errors: [ENOENT, ENOTEMPTY, ENOTDIR, EACCES, EROFS, ENAMETOOLONG, ESTALE, EBUSY]
 
   - name: Unlink
     id: 25
@@ -311,7 +311,7 @@ operations:
     request:
       path: {id: 1, type: string, required: true}
     response: Empty
-    errors: [ENOENT, EISDIR, EACCES, EROFS]
+    errors: [ENOENT, EISDIR, EACCES, EROFS, ENAMETOOLONG, ESTALE, EBUSY]
 
   - name: Rename
     id: 26
@@ -320,7 +320,7 @@ operations:
       from: {id: 1, type: string, required: true}
       to: {id: 2, type: string, required: true}
     response: Empty
-    errors: [ENOENT, EEXIST, ENOTEMPTY, EISDIR, ENOTDIR, EXDEV, EACCES, EROFS]
+    errors: [ENOENT, EEXIST, ENOTEMPTY, EISDIR, ENOTDIR, EXDEV, EACCES, EROFS, ENAMETOOLONG, ESTALE, EDQUOT, EBUSY]
 
   - name: Symlink
     id: 27
@@ -329,7 +329,7 @@ operations:
       target: {id: 1, type: string, required: true}
       link_path: {id: 2, type: string, required: true}
     response: Empty
-    errors: [EEXIST, ENOENT, EACCES, EROFS]
+    errors: [EEXIST, ENOENT, EACCES, EROFS, ENAMETOOLONG, ESTALE, EDQUOT, EBUSY]
 
   - name: Readlink
     id: 28
@@ -338,7 +338,7 @@ operations:
       path: {id: 1, type: string, required: true}
     response:
       target: {id: 1, type: string, required: true}
-    errors: [ENOENT, EINVAL]
+    errors: [ENOENT, EINVAL, ENAMETOOLONG, ESTALE]
 
   - name: Link
     id: 29
@@ -347,7 +347,7 @@ operations:
       existing: {id: 1, type: string, required: true}
       new_path: {id: 2, type: string, required: true}
     response: Empty
-    errors: [EEXIST, ENOENT, EPERM, EXDEV, EROFS]
+    errors: [EEXIST, ENOENT, EPERM, EXDEV, EROFS, ENAMETOOLONG, ESTALE, EDQUOT, EBUSY, EMLINK]
 
   - name: Chmod
     id: 30
@@ -356,7 +356,7 @@ operations:
       path: {id: 1, type: string, required: true}
       mode: {id: 2, type: uint32, required: true}
     response: Empty
-    errors: [ENOENT, EPERM, EROFS]
+    errors: [ENOENT, EPERM, EROFS, ENAMETOOLONG, ESTALE, EBUSY]
 
   - name: Utimens
     id: 31
@@ -368,7 +368,7 @@ operations:
       set_atime: {id: 4, type: bool}
       set_mtime: {id: 5, type: bool}
     response: Empty
-    errors: [ENOENT, EPERM, EROFS]
+    errors: [ENOENT, EPERM, EROFS, ENAMETOOLONG, ESTALE, EBUSY]
 
   - name: Truncate
     id: 32
@@ -377,7 +377,7 @@ operations:
       path: {id: 1, type: string, required: true}
       size: {id: 2, type: int64, required: true}
     response: Empty
-    errors: [ENOENT, EISDIR, EINVAL, EIO, EFBIG, EROFS]
+    errors: [ENOENT, EISDIR, EINVAL, EIO, EFBIG, EROFS, ENAMETOOLONG, ESTALE, EDQUOT, EBUSY]
 
   - name: Statfs
     id: 33
@@ -392,7 +392,7 @@ operations:
       files: {id: 5, type: uint64, required: true}
       files_free: {id: 6, type: uint64, required: true}
       name_max: {id: 7, type: uint32, required: true}
-    errors: [ENOENT, EIO]
+    errors: [ENOENT, EIO, ENAMETOOLONG, ESTALE]
 
   - name: Access
     id: 34
@@ -401,7 +401,7 @@ operations:
       path: {id: 1, type: string, required: true}
       mode: {id: 2, type: uint32, required: true}
     response: Empty
-    errors: [ENOENT, EACCES, EROFS]
+    errors: [ENOENT, EACCES, EROFS, ENAMETOOLONG, ESTALE]
 
   # Directories
   - name: Opendir
@@ -411,7 +411,7 @@ operations:
       path: {id: 1, type: string, required: true}
     response:
       handle: {id: 1, type: uint64, required: true}
-    errors: [ENOENT, ENOTDIR, EACCES]
+    errors: [ENOENT, ENOTDIR, EACCES, ENAMETOOLONG, ESTALE]
 
   - name: Readdir
     id: 41
@@ -443,7 +443,7 @@ operations:
     response:
       entries: {id: 1, type: "repeated DirEntry", required: true}
       next_cursor: {id: 2, type: string}
-    errors: [ENOENT, ENOTDIR, EACCES, EIO]
+    errors: [ENOENT, ENOTDIR, EACCES, EIO, ENAMETOOLONG, ESTALE]
     capability: ls_stat
 
   # Extensions: bulk operations. Each item carries its own result, so one
@@ -488,7 +488,7 @@ operations:
       max_bytes: {id: 2, type: uint64}
     response:
       count: {id: 1, type: uint32, required: true}
-    errors: [ENOENT, EISDIR, EACCES, EIO]
+    errors: [ENOENT, EISDIR, EACCES, EIO, ENAMETOOLONG, ESTALE]
     capability: bulk_io
 
   - name: WriteFile
@@ -499,7 +499,7 @@ operations:
       truncate: {id: 2, type: bool}
     response:
       count: {id: 1, type: uint32, required: true}
-    errors: [EISDIR, EACCES, EIO, ENOSPC, EROFS]
+    errors: [EISDIR, EACCES, EIO, ENOSPC, EROFS, ENAMETOOLONG, ESTALE, EDQUOT, EBUSY]
     capability: bulk_io
 
   # Recursive removal. Removes children before the parent. Stops at the first
@@ -511,7 +511,7 @@ operations:
       path: {id: 1, type: string, required: true}
     response:
       removed: {id: 1, type: uint64, required: true}
-    errors: [ENOENT, EACCES, EROFS, EIO]
+    errors: [ENOENT, EACCES, EROFS, EIO, ENAMETOOLONG, ESTALE, EBUSY]
     capability: remove_all
 
   # Watch. The call returns a watch id at once. Changes then arrive as Notice
@@ -531,7 +531,7 @@ operations:
       since_sequence: {id: 3, type: uint64}
     response:
       watch_id: {id: 1, type: uint64, required: true}
-    errors: [ENOENT, ENOTDIR, EACCES]
+    errors: [ENOENT, ENOTDIR, EACCES, ENAMETOOLONG, ESTALE]
     capability: watch
 
   - name: Unwatch
@@ -591,6 +591,9 @@ operations:
 
 errorCodes:
   # Protocol errors. Filesystem failures use POSIX names (see errno mapping in each SDK).
+  # A server produces 1001, 1002, and 1006. The codes 1003, 1004, 1005, 1007, and 1008
+  # are reserved: no server sends them (a server closes the connection instead),
+  # and a client must treat an unknown protocol code as a failed call.
   - { code: 1001, name: UNSUPPORTED_VERSION }
   - { code: 1002, name: UNSUPPORTED_OPERATION }
   - { code: 1003, name: SESSION_CLOSED }

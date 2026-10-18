@@ -615,6 +615,19 @@ fn wait_warm_success_failure_finished_and_timeout() {
 }
 
 #[test]
+fn wait_warm_after_close_fails_even_for_a_finished_warm() {
+  let srv = start();
+  let c = client(&srv, 1);
+  srv.push(0, &nframe(notice(NoticeKind::WarmDone, 41, 1)));
+  c.wait_warm(41, t(5)).unwrap();
+  c.close();
+  match c.wait_warm(41, Duration::from_millis(50)) {
+    Err(Error::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::ConnectionAborted),
+    other => panic!("{other:?}"),
+  }
+}
+
+#[test]
 fn warm_cache_keeps_the_last_1024() {
   let srv = start();
   let c = client(&srv, 1);

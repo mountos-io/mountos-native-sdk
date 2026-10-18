@@ -1,0 +1,27 @@
+pre-commit:
+  parallel: true
+  commands:
+    format-go:
+      glob: "*.go"
+      run: |
+        files=$(git diff --name-only --cached --diff-filter=ACMR -- '*.go')
+        [ -z "$files" ] && exit 0
+        bad=$(gofmt -l $files)
+        if [ -n "$bad" ]; then
+          echo "gofmt needed on:"
+          echo "$bad"
+          echo "fix: gofmt -w <files>"
+          exit 1
+        fi
+    api-check:
+      glob: "{api/**,gen/**,go/client/**,ts/src/**,rust/src/**}"
+      run: make api-check
+    proto-check:
+      glob: "{api/proto/**,go/wire/**,ts/src/gen/**,ts/package.json}"
+      run: make proto-check
+    proto-coherence:
+      glob: "{api/**,gen/**}"
+      run: make proto-coherence
+    version-check:
+      glob: "{api/**,ts/package.json,ts/package-lock.json,rust/Cargo.toml}"
+      run: make version-check

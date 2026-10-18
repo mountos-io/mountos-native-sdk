@@ -18,6 +18,8 @@ type File struct {
 	gen    uint64
 	max    int // payload bytes per frame
 	handle uint64
+	path   string        // as opened, for parallel batches
+	flags  wire.OpenFlag // as opened
 
 	mu     sync.Mutex
 	pos    int64
@@ -32,8 +34,8 @@ func (f *File) do(method uint16, req, resp proto.Message, payload []byte) ([]byt
 	if f.cl.isClosed() {
 		return nil, ErrClientClosed
 	}
-	f.c.mu.Lock()
-	defer f.c.mu.Unlock()
+	f.c.lock()
+	defer f.c.unlock()
 	if !f.c.alive() || f.c.gen != f.gen {
 		return nil, ErrConnLost
 	}

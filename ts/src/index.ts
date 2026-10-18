@@ -1,9 +1,10 @@
 export { Client, Dir, FileHandle } from "./client.js";
-export type { ClientOptions, WaitWarmOptions } from "./client.js";
-export { MountosError, ProtocolError, TransportError } from "./errors.js";
+export type { ClientOptions, WaitWarmOptions, WalkEntry } from "./client.js";
+export { DeadlineExceededError, MountosError, POSIX_ERRNOS, ProtocolError, TransportError } from "./errors.js";
 export { FileType, OpenFlag } from "./api.js";
 export type { DirEntry, FileInfo, HelloResponse } from "./api.js";
 export type { StatfsInfo } from "./ops_gen.js";
+export { socketPath } from "./socketpath.js";
 export { Watch } from "./watch.js";
 export type { WatchOptions } from "./watch.js";
 export type { ReadRange, ReadResult, StatResult, WriteItem, WriteResult } from "./bulk.js";

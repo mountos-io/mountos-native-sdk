@@ -1,6 +1,8 @@
 package client
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -17,6 +19,9 @@ const (
 	maxPayloadBytes = 8 << 20
 	maxMetaBytes    = 16 << 20
 	dialTimeout     = 10 * time.Second
+	readBufBytes    = 32 << 10
+	coalesceBytes   = 32 << 10 // largest payload copied into one buffer with its header
+	maxKeptBuf      = 1 << 20  // largest encode buffer a connection keeps between requests
 )
 
 var limits = frame.Limits{MaxMetaBytes: maxMetaBytes, MaxPayloadBytes: maxPayloadBytes}
@@ -27,8 +32,12 @@ type sock struct {
 	nc      net.Conn
 	closing atomic.Bool // set when this side closes the socket on purpose
 	dead    chan struct{}
+	errOnce sync.Once
 	err     error
 }
+
+// setErr records why the socket ended. The first reason wins.
+func (s *sock) setErr(err error) { s.errOnce.Do(func() { s.err = err }) }
 
 func (s *sock) isDead() bool {
 	select {
@@ -45,6 +54,9 @@ type pending struct {
 	ch chan frame.Frame
 }
 
+// helloCapabilities are the capabilities this client asks for in Hello.
+var helloCapabilities = []string{"bulk_io", "ls_stat", "remove_all", "watch", "warm"}
+
 // conn is one connection. mu serializes requests: one request is in flight at
 // a time. A reader goroutine reads every frame, so notices arrive on idle
 // connections too. A broken conn is redialed by the next caller, and gen
@@ -57,10 +69,23 @@ type conn struct {
 	cur     atomic.Pointer[sock]
 	nextID  uint64
 	gen     uint64
-	maxData int // largest payload per frame, from Hello
+	maxData int    // largest payload per frame, from Hello
+	wbuf    []byte // reused encode buffer for small frames. Guarded by mu.
 
 	rmu  sync.Mutex // guards pend
 	pend *pending
+}
+
+// lock takes the connection for one request. unlock releases it and wakes a
+// caller that waits for any free connection.
+func (c *conn) lock() { c.mu.Lock() }
+
+func (c *conn) unlock() {
+	c.mu.Unlock()
+	select {
+	case c.cl.free <- struct{}{}:
+	default:
+	}
 }
 
 // alive reports whether the socket is open and its reader still runs. Caller holds mu.
@@ -86,6 +111,7 @@ func (c *conn) ensure() error {
 	var resp wire.HelloResponse
 	err = c.roundTrip(mHello, &wire.HelloRequest{
 		ClientName: "mountos-native-sdk-go", MinVersion: protoVersion, MaxVersion: protoVersion,
+		Capabilities: helloCapabilities,
 	}, nil, &resp, nil)
 	if err != nil {
 		c.drop()
@@ -95,6 +121,7 @@ func (c *conn) ensure() error {
 		c.drop()
 		return &DialError{Path: c.path, Err: fmt.Errorf("server chose version %d", resp.GetVersion())}
 	}
+	c.cl.setCaps(resp.GetCapabilities())
 	c.maxData = maxPayloadBytes
 	if m := int(resp.GetMaxPayloadBytes()); m > 0 && m < c.maxData {
 		c.maxData = m
@@ -102,14 +129,27 @@ func (c *conn) ensure() error {
 	return nil
 }
 
-// drop closes the socket and waits for its reader to exit. Caller holds mu.
-func (c *conn) drop() {
+// drop closes the socket on purpose and waits for its reader to exit. Caller holds mu.
+func (c *conn) drop() { c.release(true) }
+
+// fail closes a socket that broke or lost sync. Unlike drop it reports the
+// loss to watches and listeners, with err as the reason. Caller holds mu.
+func (c *conn) fail(err error) {
+	if c.sk != nil {
+		c.sk.setErr(err)
+	}
+	c.release(false)
+}
+
+func (c *conn) release(onPurpose bool) {
 	sk := c.sk
 	if sk == nil {
 		return
 	}
 	c.sk = nil
-	sk.closing.Store(true)
+	if onPurpose {
+		sk.closing.Store(true)
+	}
 	sk.nc.Close()
 	<-sk.dead
 }
@@ -126,10 +166,11 @@ func (c *conn) shutdown() {
 // readLoop reads every frame of one socket. Responses go to the waiting call.
 // Notices go to the client. An unexpected exit reports a lost connection.
 func (c *conn) readLoop(sk *sock) {
+	br := bufio.NewReaderSize(sk.nc, readBufBytes)
 	for {
-		f, err := frame.Read(sk.nc, limits)
+		f, err := frame.Read(br, limits)
 		if err != nil {
-			sk.err = err
+			sk.setErr(err)
 			break
 		}
 		if f.Flags&frame.FlagNotify != 0 {
@@ -146,7 +187,7 @@ func (c *conn) readLoop(sk *sock) {
 		c.rmu.Unlock()
 		if !match {
 			// One request is in flight, so any other reply breaks the contract.
-			sk.err = fmt.Errorf("unexpected reply: method %d id %d", f.Method, f.RequestID)
+			sk.setErr(fmt.Errorf("unexpected reply: method %d id %d", f.Method, f.RequestID))
 			break
 		}
 	}
@@ -158,20 +199,49 @@ func (c *conn) readLoop(sk *sock) {
 }
 
 // call runs one request on the live socket. Caller holds mu and has called ensure.
-// A transport or protocol failure drops the socket. A WireError keeps it.
+// A transport or protocol failure drops the socket. A WireError keeps it, and so
+// does a request that failed before any byte was written.
 func (c *conn) call(method uint16, req, resp proto.Message, payload []byte) ([]byte, error) {
+	if err := c.cl.need(method); err != nil {
+		return nil, err
+	}
 	var out []byte
 	err := c.roundTrip(method, req, payload, resp, &out)
-	if _, ok := err.(*WireError); !ok && err != nil {
-		c.drop()
+	if err != nil && !keepsSocket(err) {
+		c.fail(err)
 	}
 	return out, err
+}
+
+// keepsSocket reports whether err leaves the socket in sync with the server.
+func keepsSocket(err error) bool {
+	var we *WireError
+	var pe *ProtocolError
+	return errors.As(err, &we) || (errors.As(err, &pe) && pe.unsent)
+}
+
+// write sends f with one system call. A small frame is copied into the
+// connection's reused buffer. A frame with a large payload goes out as a
+// vectored write, so the payload is not copied. Caller holds mu.
+func (c *conn) write(nc net.Conn, f frame.Frame) error {
+	if len(f.Payload) > coalesceBytes {
+		return frame.WriteBuffers(nc, f, limits)
+	}
+	buf, err := frame.Append(c.wbuf[:0], f, limits)
+	if err != nil {
+		return err
+	}
+	if cap(buf) <= maxKeptBuf {
+		c.wbuf = buf
+	}
+	_, err = nc.Write(buf)
+	return err
 }
 
 func (c *conn) roundTrip(method uint16, req proto.Message, payload []byte, resp proto.Message, out *[]byte) error {
 	meta, err := proto.Marshal(req)
 	if err != nil {
-		return &ProtocolError{Op: "encode request", Err: err}
+		return &ProtocolError{Op: "encode request", Err: err, unsent: true}
 	}
 	sk := c.sk
 	c.nextID++
@@ -186,12 +256,27 @@ func (c *conn) roundTrip(method uint16, req proto.Message, payload []byte, resp 
 		}
 		c.rmu.Unlock()
 	}()
-	if err := frame.Write(sk.nc, frame.Frame{Method: method, RequestID: p.id, Meta: meta, Payload: payload}, limits); err != nil {
-		return &ProtocolError{Op: "write frame", Err: err}
+	var expired <-chan time.Time
+	if d := c.cl.callTimeout; d > 0 {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		expired = t.C
+		sk.nc.SetWriteDeadline(time.Now().Add(d))
+		defer sk.nc.SetWriteDeadline(time.Time{})
+	}
+	err = c.write(sk.nc, frame.Frame{Method: method, RequestID: p.id, Meta: meta, Payload: payload})
+	if err != nil {
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			return &TimeoutError{After: c.cl.callTimeout}
+		}
+		return &ProtocolError{Op: "write frame", Err: err, unsent: errors.Is(err, frame.ErrTooLarge)}
 	}
 	var f frame.Frame
 	select {
 	case f = <-p.ch:
+	case <-expired:
+		return &TimeoutError{After: c.cl.callTimeout}
 	case <-sk.dead:
 		select {
 		case f = <-p.ch: // the reply arrived just before the socket died

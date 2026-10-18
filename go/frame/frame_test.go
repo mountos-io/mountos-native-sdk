@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"net"
+	"runtime"
 	"testing"
 )
 
@@ -110,5 +112,126 @@ func TestWriteRejectsOverLimit(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("wrote %d bytes for a rejected frame", buf.Len())
+	}
+}
+
+func TestReadClaimedSectionDoesNotPreallocate(t *testing.T) {
+	lim := Limits{MaxMetaBytes: 16 << 20, MaxPayloadBytes: 8 << 20}
+	var buf bytes.Buffer
+	hdr := [HeaderSize]byte{'M', 'F', 'S', '1', Version}
+	hdr[16], hdr[17] = 0x01, 0x00 // meta length 16 MiB
+	buf.Write(hdr[:])
+	buf.Write(make([]byte, 100)) // the peer sends 100 bytes and stops
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := Read(&buf, lim)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("err = %v, want unexpected EOF", err)
+	}
+	if got := after.TotalAlloc - before.TotalAlloc; got > 1<<20 {
+		t.Fatalf("allocated %d bytes for a stalled 16 MiB claim", got)
+	}
+}
+
+func TestReadLargeSectionsRoundTrip(t *testing.T) {
+	lim := Limits{MaxMetaBytes: 1 << 20, MaxPayloadBytes: 1 << 20}
+	meta := bytes.Repeat([]byte{1, 2, 3}, 70_000)
+	payload := bytes.Repeat([]byte{9, 8}, 200_001)
+	var buf bytes.Buffer
+	if err := Write(&buf, Frame{Meta: meta, Payload: payload}, lim); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(&buf, lim)
+	if err != nil || !bytes.Equal(got.Meta, meta) || !bytes.Equal(got.Payload, payload) {
+		t.Fatalf("round trip failed: %v", err)
+	}
+}
+
+func TestWriteBuffersMatchesWrite(t *testing.T) {
+	cases := []Frame{
+		{Method: 2, RequestID: 1},
+		{Method: 10, RequestID: 7, Meta: []byte("meta")},
+		{Method: 13, RequestID: 8, Payload: []byte("raw bytes")},
+		{Flags: FlagResponse, Method: 14, RequestID: 1 << 40, Meta: []byte{1, 2}, Payload: bytes.Repeat([]byte{0xAB}, 4096)},
+	}
+	for _, f := range cases {
+		var got bytes.Buffer
+		if err := WriteBuffers(&got, f, testLimits); err != nil {
+			t.Fatalf("WriteBuffers: %v", err)
+		}
+		if !bytes.Equal(got.Bytes(), encode(t, f)) {
+			t.Fatalf("WriteBuffers bytes differ from Write for %+v", f)
+		}
+	}
+}
+
+func TestWriteBuffersRejectsOverLimit(t *testing.T) {
+	var buf bytes.Buffer
+	f := Frame{Meta: make([]byte, testLimits.MaxMetaBytes+1)}
+	if err := WriteBuffers(&buf, f, testLimits); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("meta over limit: got %v, want ErrTooLarge", err)
+	}
+	f = Frame{Payload: make([]byte, testLimits.MaxPayloadBytes+1)}
+	if err := WriteBuffers(&buf, f, testLimits); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("payload over limit: got %v, want ErrTooLarge", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("rejected frame wrote %d bytes", buf.Len())
+	}
+}
+
+func TestWriteBuffersOverTCP(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("no loopback: %v", err)
+	}
+	defer ln.Close()
+	want := Frame{Flags: FlagResponse, Method: 14, RequestID: 9, Meta: []byte("m"), Payload: bytes.Repeat([]byte{7}, 200<<10)}
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		_ = WriteBuffers(c, want, testLimits)
+	}()
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	got, err := Read(c, testLimits)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got.RequestID != want.RequestID || !bytes.Equal(got.Meta, want.Meta) || !bytes.Equal(got.Payload, want.Payload) {
+		t.Fatal("frame differs after TCP round trip")
+	}
+}
+
+func TestAppendMatchesWrite(t *testing.T) {
+	cases := []Frame{
+		{Method: 2, RequestID: 1},
+		{Method: 10, RequestID: 7, Meta: []byte("meta")},
+		{Flags: FlagResponse, Method: 14, RequestID: 1 << 40, Meta: []byte{1, 2}, Payload: bytes.Repeat([]byte{0xAB}, 4096)},
+	}
+	prefix := []byte("keep")
+	for _, f := range cases {
+		got, err := Append(prefix, f, testLimits)
+		if err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		if !bytes.HasPrefix(got, prefix) || !bytes.Equal(got[len(prefix):], encode(t, f)) {
+			t.Fatalf("Append bytes differ from Write for %+v", f)
+		}
+	}
+}
+
+func TestAppendRejectsOverLimitAndKeepsDst(t *testing.T) {
+	dst := []byte("keep")
+	got, err := Append(dst, Frame{Payload: make([]byte, testLimits.MaxPayloadBytes+1)}, testLimits)
+	if !errors.Is(err, ErrTooLarge) || string(got) != "keep" {
+		t.Fatalf("got %q, %v", got, err)
 	}
 }

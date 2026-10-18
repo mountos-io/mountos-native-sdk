@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -71,7 +72,8 @@ func TestStatBatchSplits(t *testing.T) {
 	s.mu.Lock()
 	sizes := append([]int(nil), s.statSizes...)
 	s.mu.Unlock()
-	if fmt.Sprint(sizes) != "[4096 4096 10]" {
+	slices.Sort(sizes)
+	if fmt.Sprint(sizes) != "[10 4096 4096]" {
 		t.Fatalf("request sizes = %v", sizes)
 	}
 }

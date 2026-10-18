@@ -37,7 +37,7 @@ func (cl *Client) Watch(path string, recursive bool, since uint64) (*Watch, erro
 		return nil, ErrClientClosed
 	}
 	c := cl.acquire()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	if err := c.ensure(); err != nil {
 		return nil, err
 	}
@@ -75,11 +75,11 @@ func (w *Watch) Events() <-chan Event { return w.ch }
 func (w *Watch) Close() error {
 	var err error
 	if !w.cl.isClosed() {
-		w.c.mu.Lock()
+		w.c.lock()
 		if w.c.sk == w.sk && w.c.alive() {
 			_, err = w.c.call(mUnwatch, &wire.UnwatchRequest{WatchId: w.ID()}, &wire.Empty{}, nil)
 		}
-		w.c.mu.Unlock()
+		w.c.unlock()
 	}
 	w.finish()
 	var we *WireError
@@ -115,14 +115,13 @@ func (w *Watch) setID(id uint64) {
 }
 
 // matches reports whether ev is for this watch. Caller holds mu and id is known.
-// An overflow without a watch id applies to every watch of its connection, and
-// a local overflow applies to every watch.
+// An overflow without a watch id applies to every watch of its connection.
 func (w *Watch) matches(ev Event) bool {
 	switch ev.Kind {
 	case EventChange:
 		return ev.src == w.sk && ev.RefID == w.id
 	case EventOverflow:
-		return ev.src == nil || (ev.src == w.sk && (ev.RefID == w.id || ev.RefID == 0))
+		return ev.src == w.sk && (ev.RefID == w.id || ev.RefID == 0)
 	}
 	return false
 }
@@ -143,7 +142,7 @@ func (w *Watch) offer(ev Event) bool {
 		return false
 	}
 	if !w.known {
-		if ev.src != w.sk && ev.src != nil {
+		if ev.src != w.sk {
 			return false
 		}
 		if len(w.early) >= watchBuffer {

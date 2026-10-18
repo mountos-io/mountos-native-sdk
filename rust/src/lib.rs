@@ -20,6 +20,8 @@ mod events;
 mod file;
 pub mod frame;
 mod ops_gen;
+mod socket;
+mod walk;
 mod watch;
 pub mod wire;
 
@@ -29,5 +31,6 @@ pub use dir::Dir;
 pub use error::{Error, Result};
 pub use events::{ChangeKind, Event, EventKind, ListenerId, Logger};
 pub use file::{File, WriteItem};
+pub use socket::socket_path;
 pub use watch::Watch;
 pub use wire::{open_flag, DirEntry, FileInfo, FileType, Range, StatfsInfo};

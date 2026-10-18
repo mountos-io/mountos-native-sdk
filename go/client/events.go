@@ -164,9 +164,9 @@ func (h *hub) shutdown() {
 }
 
 // AddListener registers fn for every event. Events arrive in order from one
-// goroutine per Client, so fn must return soon. When fn is slow and 1024
-// events queue up, the oldest are dropped and fn gets one EventOverflow in
-// their place. With no listener registered, the client logs each event.
+// goroutine per Client, so fn must return soon. A slow fn does not delay Watch
+// events. When fn is slow and 1024 events queue up, the oldest are dropped and
+// fn gets one EventOverflow in their place. With no listener registered, the client logs each event.
 // Call the returned function to remove fn.
 func (cl *Client) AddListener(fn func(Event)) (remove func()) {
 	h := cl.hub
@@ -191,7 +191,7 @@ func (cl *Client) AddListener(fn func(Event)) (remove func()) {
 	}
 }
 
-// notice decodes a notice frame and queues it. Warm results also reach the
+// notice decodes a notice frame and delivers it. Warm results also reach the
 // warm cache at once, so WaitWarm never depends on the listener queue.
 func (h *hub) notice(sk *sock, f frame.Frame) {
 	var n wire.Notice
@@ -224,16 +224,50 @@ func (h *hub) notice(sk *sock, f frame.Frame) {
 		h.log.Printf("unknown notice kind %d on request %d", int32(n.GetKind()), f.RequestID)
 		return
 	}
+	h.emit(ev)
+}
+
+// connLost reports a connection that dropped without the client asking for it.
+func (h *hub) connLost(sk *sock) {
+	h.emit(Event{Kind: EventConnLost, Err: fmt.Errorf("%w: %v", ErrConnLost, sk.err), Time: time.Now(), src: sk})
+}
+
+// emit gives ev to the watches at once, from the caller's goroutine, so a slow
+// listener never delays them. The listeners get it through the bounded queue.
+// An event nobody takes is logged.
+func (h *hub) emit(ev Event) {
+	taken := h.offerWatches(ev)
+	h.lmu.Lock()
+	listening := len(h.listeners) > 0
+	h.lmu.Unlock()
+	if !listening {
+		if !taken {
+			h.log.Printf("%s: %s", listenerNote, describe(ev))
+		}
+		return
+	}
 	h.enqueue(ev)
 }
 
-// connLost queues the local event for a connection that dropped unexpectedly.
-func (h *hub) connLost(sk *sock) {
-	h.enqueue(Event{Kind: EventConnLost, Err: fmt.Errorf("%w: %v", ErrConnLost, sk.err), Time: time.Now(), src: sk})
+// offerWatches offers ev to every watch and reports whether one took it.
+func (h *hub) offerWatches(ev Event) bool {
+	h.lmu.Lock()
+	ws := make([]*Watch, 0, len(h.watches))
+	for w := range h.watches {
+		ws = append(ws, w)
+	}
+	h.lmu.Unlock()
+	taken := false
+	for _, w := range ws {
+		if w.offer(ev) {
+			taken = true
+		}
+	}
+	return taken
 }
 
-// enqueue adds ev to the bounded queue. When the queue is full the oldest
-// event goes.
+// enqueue adds ev to the bounded listener queue. When the queue is full the
+// oldest event goes.
 func (h *hub) enqueue(ev Event) {
 	h.qmu.Lock()
 	if h.stopped {
@@ -279,25 +313,11 @@ func (h *hub) run() {
 	}
 }
 
-// deliver gives ev to the watches and every listener. An event nobody takes is logged.
+// deliver gives ev to every listener.
 func (h *hub) deliver(ev Event) {
 	h.lmu.Lock()
 	ls := h.listeners
-	ws := make([]*Watch, 0, len(h.watches))
-	for w := range h.watches {
-		ws = append(ws, w)
-	}
 	h.lmu.Unlock()
-	taken := false
-	for _, w := range ws {
-		if w.offer(ev) {
-			taken = true
-		}
-	}
-	if len(ls) == 0 && !taken {
-		h.log.Printf("%s: %s", listenerNote, describe(ev))
-		return
-	}
 	for _, l := range ls {
 		h.call(l.fn, ev)
 	}

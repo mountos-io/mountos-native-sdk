@@ -1,5 +1,5 @@
 import net from "node:net";
-import { ProtocolError, TransportError } from "./errors.js";
+import { DeadlineExceededError, ProtocolError, TransportError } from "./errors.js";
 import { encodeFrame, FLAG_ERROR, FLAG_NOTIFY, FLAG_RESPONSE, Frame, FrameReader } from "./frame.js";
 import { decWireError } from "./api.js";
 
@@ -22,8 +22,10 @@ export class Conn {
   private nextId = 1;
   private failure: Error | undefined;
   private byClient = false;
-  /** Requests queued or running. The pool uses it to pick the least loaded connection. */
+  /** Requests queued or running, plus reservations. The pool uses it to pick a free connection. */
   load = 0;
+  /** Runs when load drops to zero. */
+  onIdle: () => void = noop;
   /**
    * Gets every notify frame in arrival order, with or without a request in flight.
    * It may throw to report a malformed notice, which fails the connection.
@@ -34,13 +36,14 @@ export class Conn {
   /** Set by the owner when the server announced the close. */
   closingSeen = false;
 
-  private constructor(private socket: net.Socket) {
+  private constructor(private socket: net.Socket, private callTimeoutMs: number) {
     socket.on("data", (c) => this.onData(c));
     socket.on("error", (e) => this.fail(new TransportError(`socket error: ${e.message}`, { cause: e })));
     socket.on("close", () => this.fail(new TransportError("connection closed")));
   }
 
-  static connect(path: string): Promise<Conn> {
+  /** callTimeoutMs bounds every call on this connection. Zero means no limit. */
+  static connect(path: string, callTimeoutMs = 0): Promise<Conn> {
     return new Promise((resolve, reject) => {
       const s = net.connect(path);
       const onErr = (e: Error): void =>
@@ -48,7 +51,7 @@ export class Conn {
       s.once("error", onErr);
       s.once("connect", () => {
         s.off("error", onErr);
-        resolve(new Conn(s));
+        resolve(new Conn(s, callTimeoutMs));
       });
     });
   }
@@ -57,12 +60,45 @@ export class Conn {
     return this.failure === undefined;
   }
 
-  /** onReply sees the response frame in the read loop, before notices that follow it. */
-  call(method: number, meta: Buffer, payload: Buffer = Buffer.alloc(0), onReply?: (f: Frame) => void): Promise<Frame> {
+  /** Holds the connection for the caller. Pair with unreserve. */
+  reserve(): void {
     this.load++;
-    const run = this.tail.then(() => this.exchange(method, meta, payload, onReply));
+  }
+
+  unreserve(): void {
+    if (--this.load === 0) this.onIdle();
+  }
+
+  /**
+   * onReply sees the response frame in the read loop, before notices that follow it.
+   * timeoutMs overrides the connection limit. A call that times out after its request was sent
+   * ends the connection. One that times out while queued is dropped and nothing is sent.
+   */
+  call(
+    method: number, meta: Buffer, payload: Buffer = Buffer.alloc(0), onReply?: (f: Frame) => void,
+    timeoutMs = this.callTimeoutMs,
+  ): Promise<Frame> {
+    this.load++;
+    const state = { sent: false, expired: undefined as Error | undefined };
+    const run = this.tail.then(() => this.exchange(method, meta, payload, onReply, state));
     this.tail = run.then(noop, noop);
-    return run.finally(() => this.load--);
+    let out = run;
+    let timer: NodeJS.Timeout | undefined;
+    if (timeoutMs > 0) {
+      out = new Promise<Frame>((resolve, reject) => {
+        timer = setTimeout(() => {
+          const e = new DeadlineExceededError(`call method ${method} exceeded ${timeoutMs} ms`);
+          state.expired = e;
+          if (state.sent) this.fail(e);
+          reject(e);
+        }, timeoutMs);
+        run.then(resolve, reject);
+      });
+    }
+    return out.finally(() => {
+      clearTimeout(timer);
+      this.unreserve();
+    });
   }
 
   close(): void {
@@ -70,7 +106,11 @@ export class Conn {
     this.fail(new TransportError("connection closed by client"));
   }
 
-  private exchange(method: number, meta: Buffer, payload: Buffer, onReply?: (f: Frame) => void): Promise<Frame> {
+  private exchange(
+    method: number, meta: Buffer, payload: Buffer, onReply: ((f: Frame) => void) | undefined,
+    state: { sent: boolean; expired: Error | undefined },
+  ): Promise<Frame> {
+    if (state.expired) return Promise.reject(state.expired);
     if (this.failure) return Promise.reject(this.failure);
     const id = this.nextId++;
     let parts: Buffer[];
@@ -81,6 +121,7 @@ export class Conn {
     }
     return new Promise<Frame>((resolve, reject) => {
       this.pending = { id, method, resolve, reject, onReply };
+      state.sent = true;
       this.socket.cork();
       for (const p of parts) if (p.length > 0) this.socket.write(p);
       this.socket.uncork();
