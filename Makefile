@@ -25,6 +25,7 @@ api-gen: ## Regenerate the proto, Go wire types, and client stubs for every lang
 	cd gen && go run . $(GEN_FLAGS)
 	$(PROTOC) --plugin=protoc-gen-go=$(PROTOC_GEN_GO) --proto_path=api/proto --go_out=go \
 	  --go_opt=module=github.com/mountos-io/mountos-native-sdk/go api/proto/mountos_fs.proto
+	cp api/proto/mountos_fs.proto rust/proto/mountos_fs.proto
 	cd ts && npm run gen
 
 api-check: ## Validate the specs, check compatibility, and fail when a generated file is stale
@@ -44,6 +45,8 @@ proto-check: ## Fail when go/wire or ts/src/gen differs from protoc output for t
 proto-coherence: ## Fail when the committed proto differs from the spec (text and descriptor level)
 	cd gen && go run . $(SPEC_FLAGS) -proto-out ../api/proto/mountos_fs.proto -verify \
 	  || { echo "proto-coherence: api/proto/mountos_fs.proto does not match api/filesystem.yaml. Fix: make api-gen"; exit 1; }
+	cmp -s api/proto/mountos_fs.proto rust/proto/mountos_fs.proto \
+	  || { echo "proto-coherence: rust/proto/mountos_fs.proto differs from api/proto/mountos_fs.proto. Fix: make api-gen"; exit 1; }
 	cd gen && go test -count=1 -run 'TestCommittedProto|TestDescriptorCheck' ./... \
 	  || { echo "proto-coherence: descriptor check failed. Fix: make api-gen"; exit 1; }
 
