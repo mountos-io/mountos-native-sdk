@@ -77,6 +77,9 @@ func (cl *Client) Stat(path string) (*wire.FileInfo, error) {
 	if err := cl.run(mStat, &wire.StatRequest{Path: path}, &r); err != nil {
 		return nil, err
 	}
+	if r.GetInfo() == nil {
+		return nil, missingResult("Stat", "info")
+	}
 	return r.GetInfo(), nil
 }
 
@@ -85,6 +88,9 @@ func (cl *Client) Lstat(path string) (*wire.FileInfo, error) {
 	var r wire.LstatResponse
 	if err := cl.run(mLstat, &wire.LstatRequest{Path: path}, &r); err != nil {
 		return nil, err
+	}
+	if r.GetInfo() == nil {
+		return nil, missingResult("Lstat", "info")
 	}
 	return r.GetInfo(), nil
 }
@@ -96,6 +102,9 @@ func (f *File) Stat() (*wire.FileInfo, error) {
 	defer f.mu.Unlock()
 	if _, err := f.do(mFstat, &wire.FstatRequest{Handle: f.handle}, &r, nil); err != nil {
 		return nil, err
+	}
+	if r.GetInfo() == nil {
+		return nil, missingResult("Stat", "info")
 	}
 	return r.GetInfo(), nil
 }

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"slices"
 )
 
 // Magic identifies a native API frame stream.
@@ -166,10 +165,14 @@ func Read(r io.Reader, lim Limits) (Frame, error) {
 	return f, nil
 }
 
-// readChunk is the step a large section grows by. The buffer is sized by the
+// readChunk is the first step of a large section. The buffer is sized by the
 // bytes that arrived, never by the length the header claims, so a peer that
-// claims a large section and stalls holds at most one chunk.
+// claims a large section and stalls holds at most one chunk plus the growth
+// its received bytes earned.
 const readChunk = 64 << 10
+
+// growFactor multiplies the received size when a full buffer needs room.
+const growFactor = 4
 
 // readSection reads exactly n bytes from r. It returns nil for n == 0.
 func readSection(r io.Reader, n uint32) ([]byte, error) {
@@ -181,15 +184,24 @@ func readSection(r io.Reader, n uint32) ([]byte, error) {
 		_, err := io.ReadFull(r, b)
 		return b, err
 	}
-	buf := make([]byte, 0, readChunk)
+	buf := make([]byte, readChunk)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return nil, err
+	}
 	for uint32(len(buf)) < n {
-		step := min(readChunk, int(n)-len(buf))
-		buf = slices.Grow(buf, step)
-		got := len(buf)
-		if _, err := io.ReadFull(r, buf[got:got+step]); err != nil {
+		// A full buffer grows once to growFactor times what has arrived, capped
+		// at the claimed size, so a large section costs a few copies.
+		if len(buf) == cap(buf) {
+			grown := make([]byte, len(buf), min(int64(n), int64(len(buf))*growFactor))
+			copy(grown, buf)
+			buf = grown
+		}
+		end := min(cap(buf), int(n))
+		got, err := io.ReadFull(r, buf[len(buf):end])
+		buf = buf[:len(buf)+got]
+		if err != nil {
 			return nil, err
 		}
-		buf = buf[:got+step]
 	}
 	return buf, nil
 }

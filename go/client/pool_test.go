@@ -185,6 +185,9 @@ func TestStatChunksRespectMetaBudget(t *testing.T) {
 }
 
 func TestReadBatchParallelAcrossConns(t *testing.T) {
+	old := fanoutMinBytes
+	fanoutMinBytes = 0
+	t.Cleanup(func() { fanoutMinBytes = old })
 	s := newFakeServer(t, 1000)
 	s.batchDelay = 80 * time.Millisecond
 	data := pattern(6000, 3)

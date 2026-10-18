@@ -103,12 +103,16 @@ func writeGoStub(b *bytes.Buffer, s *Spec, st Stub) {
 
 	// Result type and the expression that builds it from the response.
 	retSig, retExpr, zero := "error", "", ""
+	missing := "" // field name of a message result that a success reply must carry
 	switch {
 	case len(st.Returns) == 1:
 		gt := goType(s, st.Returns[0].Type)
 		retSig = fmt.Sprintf("(%s, error)", gt)
 		retExpr = fmt.Sprintf("r.Get%s()", upperCamel(st.Returns[0].Name))
 		zero = goZero(gt)
+		if strings.HasPrefix(gt, "*") {
+			missing = st.Returns[0].Name
+		}
 	case len(st.Returns) > 1:
 		retSig = fmt.Sprintf("(*%s, error)", st.Result)
 		parts := make([]string, 0, len(st.Returns))
@@ -136,14 +140,18 @@ func writeGoStub(b *bytes.Buffer, s *Spec, st Stub) {
 		call = fmt.Sprintf("f.do(m%s, %s, %s, nil)", st.Op.Name, req, resp)
 	}
 
+	check := ""
+	if missing != "" {
+		check = fmt.Sprintf("\tif %s == nil {\n\t\treturn nil, missingResult(%q, %q)\n\t}\n", retExpr, st.Name, missing)
+	}
 	switch {
 	case len(st.Returns) == 0 && st.Scope == "client":
 		fmt.Fprintf(b, "\treturn %s\n}\n\n", call)
 	case len(st.Returns) == 0:
 		fmt.Fprintf(b, "\t_, err := %s\n\treturn err\n}\n\n", call)
 	case st.Scope == "client":
-		fmt.Fprintf(b, "\tif err := %s; err != nil {\n\t\treturn %s, err\n\t}\n\treturn %s, nil\n}\n\n", call, zero, retExpr)
+		fmt.Fprintf(b, "\tif err := %s; err != nil {\n\t\treturn %s, err\n\t}\n%s\treturn %s, nil\n}\n\n", call, zero, check, retExpr)
 	default:
-		fmt.Fprintf(b, "\tif _, err := %s; err != nil {\n\t\treturn %s, err\n\t}\n\treturn %s, nil\n}\n\n", call, zero, retExpr)
+		fmt.Fprintf(b, "\tif _, err := %s; err != nil {\n\t\treturn %s, err\n\t}\n%s\treturn %s, nil\n}\n\n", call, zero, check, retExpr)
 	}
 }

@@ -264,6 +264,10 @@ func release(files []*File) error {
 	return first
 }
 
+// fanoutMinBytes is the smallest ReadBatch size worth the extra opens and
+// stats that parallel connections cost.
+var fanoutMinBytes = 256 << 10
+
 // readGroup is the checked reply to one ReadBatch request.
 type readGroup struct {
 	counts []uint32
@@ -276,19 +280,26 @@ type readGroup struct {
 // can be opened again by path. Results are in range order. A range past end of
 // file returns fewer bytes than its length, and bytes after a short or failed
 // part of a range are dropped. The File position is not used or changed.
+// Data of a range read in one piece shares the reply buffer with other ranges
+// of the same request, so it stays allocated while any such Data is in use.
 func (f *File) ReadBatch(ranges []Range) ([]ReadResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	offsets := make([]int64, len(ranges))
 	lengths := make([]int, len(ranges))
+	total := 0
 	for i, r := range ranges {
 		if r.Offset < 0 {
 			return nil, fmt.Errorf("mountos: negative offset in range %d", i)
 		}
 		offsets[i], lengths[i] = r.Offset, int(r.Length)
+		total += int(r.Length)
 	}
 	gs := groups(pieces(offsets, lengths, f.chunk()), f.chunk())
-	files := f.fanout(len(gs))
+	files := []*File{f}
+	if total >= fanoutMinBytes {
+		files = f.fanout(len(gs))
+	}
 	outs := make([]readGroup, len(gs))
 	err := parallelDo(len(files), len(gs), func(w, gi int) error {
 		g := gs[gi]
@@ -331,7 +342,13 @@ func (f *File) ReadBatch(ranges []Range) ([]ReadResult, error) {
 			n := int(o.counts[i])
 			out := &res[p.owner]
 			if !short[p.owner] {
-				out.Data = append(out.Data, o.data[pos:pos+n]...)
+				if out.Data == nil && n > 0 {
+					// The first part aliases the reply buffer. The capacity cap makes a
+					// later part or a caller append copy instead of writing a neighbor.
+					out.Data = o.data[pos : pos+n : pos+n]
+				} else {
+					out.Data = append(out.Data, o.data[pos:pos+n]...)
+				}
 				short[p.owner] = n < p.length
 			}
 			pos += n

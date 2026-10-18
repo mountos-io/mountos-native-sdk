@@ -134,3 +134,35 @@ ops:
 		}
 	}
 }
+
+func TestEmitGoRejectsMissingMessageResult(t *testing.T) {
+	var s Spec
+	if err := yaml.Unmarshal([]byte(stubSpec), &s); err != nil {
+		t.Fatal(err)
+	}
+	stubs, errs := buildStubs(&s, parseClient(t, `
+ops:
+  Ping: {doc: "Pings."}
+  Stat: {doc: "Stats."}
+  Flush: {doc: "Flushes."}
+  Two: {result: TwoInfo, doc: "Two."}
+`))
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	src, err := emitGo(&s, stubs)
+	if err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	out := strings.Join(strings.Fields(string(src)), " ")
+	for _, want := range []string{
+		`if r.GetInfo() == nil { return nil, missingResult("Stat", "info") }`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("generated Go missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, `missingResult("Ping"`) || strings.Contains(out, `missingResult("Two"`) {
+		t.Fatalf("check emitted for an op without a single message result:\n%s", out)
+	}
+}

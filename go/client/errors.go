@@ -97,3 +97,9 @@ func (e *TimeoutError) Temporary() bool { return true }
 
 // Is matches context.DeadlineExceeded.
 func (e *TimeoutError) Is(target error) bool { return target == context.DeadlineExceeded }
+
+// missingResult reports a success reply that lacks the message result op needs.
+// The reply decoded cleanly, so the socket stays in sync.
+func missingResult(op, field string) error {
+	return &ProtocolError{Op: op, Err: fmt.Errorf("reply carries no %s", field)}
+}

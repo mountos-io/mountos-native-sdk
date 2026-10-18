@@ -71,9 +71,12 @@ type conn struct {
 	gen     uint64
 	maxData int    // largest payload per frame, from Hello
 	wbuf    []byte // reused encode buffer for small frames. Guarded by mu.
+	mbuf    []byte // reused request metadata buffer. Guarded by mu.
+	slot    pending
+	timer   *time.Timer // reused call timer. Guarded by mu.
 
 	rmu  sync.Mutex // guards pend
-	pend *pending
+	pend *pending   // &slot while a request waits, else nil
 }
 
 // lock takes the connection for one request. unlock releases it and wakes a
@@ -238,29 +241,65 @@ func (c *conn) write(nc net.Conn, f frame.Frame) error {
 	return err
 }
 
+// arm makes slot the waiting request id and clears any reply a dead socket
+// left behind. One request is in flight per conn, so one slot and its channel
+// serve every call. Caller holds mu.
+func (c *conn) arm(id uint64) *pending {
+	p := &c.slot
+	if p.ch == nil {
+		p.ch = make(chan frame.Frame, 1)
+	}
+	select {
+	case <-p.ch:
+	default:
+	}
+	c.rmu.Lock()
+	p.id = id
+	c.pend = p
+	c.rmu.Unlock()
+	return p
+}
+
+// disarm clears the waiting request. Caller holds mu.
+func (c *conn) disarm() {
+	c.rmu.Lock()
+	c.pend = nil
+	c.rmu.Unlock()
+}
+
+// callTimer returns the reused timer set to fire after d. Caller holds mu and
+// calls stopTimer when the call ends.
+func (c *conn) callTimer(d time.Duration) *time.Timer {
+	if c.timer == nil {
+		c.timer = time.NewTimer(d)
+	} else {
+		c.timer.Reset(d)
+	}
+	return c.timer
+}
+
+func (c *conn) stopTimer() {
+	if c.timer != nil {
+		c.timer.Stop()
+	}
+}
+
 func (c *conn) roundTrip(method uint16, req proto.Message, payload []byte, resp proto.Message, out *[]byte) error {
-	meta, err := proto.Marshal(req)
+	meta, err := proto.MarshalOptions{}.MarshalAppend(c.mbuf[:0], req)
 	if err != nil {
 		return &ProtocolError{Op: "encode request", Err: err, unsent: true}
 	}
+	if cap(meta) <= maxKeptBuf {
+		c.mbuf = meta
+	}
 	sk := c.sk
 	c.nextID++
-	p := &pending{id: c.nextID, ch: make(chan frame.Frame, 1)}
-	c.rmu.Lock()
-	c.pend = p
-	c.rmu.Unlock()
-	defer func() {
-		c.rmu.Lock()
-		if c.pend == p {
-			c.pend = nil
-		}
-		c.rmu.Unlock()
-	}()
+	p := c.arm(c.nextID)
+	defer c.disarm()
 	var expired <-chan time.Time
 	if d := c.cl.callTimeout; d > 0 {
-		t := time.NewTimer(d)
-		defer t.Stop()
-		expired = t.C
+		expired = c.callTimer(d).C
+		defer c.stopTimer()
 		sk.nc.SetWriteDeadline(time.Now().Add(d))
 		defer sk.nc.SetWriteDeadline(time.Time{})
 	}

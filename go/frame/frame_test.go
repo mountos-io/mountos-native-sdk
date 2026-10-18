@@ -134,6 +134,47 @@ func TestReadClaimedSectionDoesNotPreallocate(t *testing.T) {
 	}
 }
 
+func TestReadStalledAfterChunksStaysBounded(t *testing.T) {
+	lim := Limits{MaxMetaBytes: 16 << 20, MaxPayloadBytes: 8 << 20}
+	for _, sent := range []int{readChunk, readChunk + 1, 3 * readChunk, 5 * readChunk} {
+		var buf bytes.Buffer
+		hdr := [HeaderSize]byte{'M', 'F', 'S', '1', Version}
+		hdr[21] = 0x80 // payload length 8 MiB
+		buf.Write(hdr[:])
+		buf.Write(make([]byte, sent))
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		_, err := Read(&buf, lim)
+		runtime.ReadMemStats(&after)
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("sent %d: err = %v, want unexpected EOF", sent, err)
+		}
+		// Total allocation stays within a small multiple of the bytes that arrived.
+		if got := after.TotalAlloc - before.TotalAlloc; got > uint64(growFactor*sent+2*readChunk)*2 {
+			t.Fatalf("sent %d: allocated %d bytes for a stalled 8 MiB claim", sent, got)
+		}
+	}
+}
+
+func TestReadLargePayloadAllocations(t *testing.T) {
+	lim := Limits{MaxMetaBytes: 1 << 10, MaxPayloadBytes: 8 << 20}
+	payload := bytes.Repeat([]byte{7}, 1<<20)
+	var enc bytes.Buffer
+	if err := Write(&enc, Frame{Payload: payload}, lim); err != nil {
+		t.Fatal(err)
+	}
+	raw := enc.Bytes()
+	allocs := testing.AllocsPerRun(20, func() {
+		f, err := Read(bytes.NewReader(raw), lim)
+		if err != nil || len(f.Payload) != len(payload) {
+			t.Fatalf("read failed: %v", err)
+		}
+	})
+	if allocs > 5 {
+		t.Fatalf("1 MiB read made %v allocations, want at most 5", allocs)
+	}
+}
+
 func TestReadLargeSectionsRoundTrip(t *testing.T) {
 	lim := Limits{MaxMetaBytes: 1 << 20, MaxPayloadBytes: 1 << 20}
 	meta := bytes.Repeat([]byte{1, 2, 3}, 70_000)
