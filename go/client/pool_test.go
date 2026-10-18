@@ -308,7 +308,7 @@ func TestMissingCapabilityFailsLocally(t *testing.T) {
 	s.mu.Lock()
 	asked := len(s.helloCaps)
 	s.mu.Unlock()
-	if asked != 5 {
+	if asked != 6 {
 		t.Fatalf("hello asked for %d capabilities", asked)
 	}
 	f := openRW(t, cl, "/c")

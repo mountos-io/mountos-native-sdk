@@ -26,11 +26,12 @@ mod watch;
 pub mod wire;
 
 pub use bulk::StatResult;
-pub use client::{Client, ClientOptions, Options};
+pub use client::{Client, ClientOptions, Options, DEFAULT_MAX_INFLIGHT};
 pub use dir::Dir;
 pub use error::{Error, Result};
 pub use events::{ChangeKind, Event, EventKind, ListenerId, Logger};
 pub use file::{File, WriteItem};
 pub use socket::socket_path;
+pub use walk::{DEFAULT_MAX_DIR_ENTRIES, DEFAULT_MAX_WALK_PENDING};
 pub use watch::Watch;
 pub use wire::{open_flag, DirEntry, FileInfo, FileType, Range, StatfsInfo};

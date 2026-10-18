@@ -199,7 +199,7 @@ func TestHandleIsolation(t *testing.T) {
 	}
 	conns := map[*conn]bool{}
 	for _, f := range files {
-		conns[f.c] = true
+		conns[f.sk.c] = true
 	}
 	if len(conns) < 2 {
 		t.Fatalf("files spread over %d conns", len(conns))

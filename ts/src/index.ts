@@ -1,6 +1,13 @@
-export { Client, Dir, FileHandle } from "./client.js";
-export type { ClientOptions, WaitWarmOptions, WalkEntry } from "./client.js";
-export { DeadlineExceededError, MountosError, POSIX_ERRNOS, ProtocolError, TransportError } from "./errors.js";
+export { Client, DEFAULT_MAX_DIR_ENTRIES, DEFAULT_MAX_WALK_DEPTH, Dir, FileHandle } from "./client.js";
+export type { ClientOptions, ReadDirAllOptions, WaitWarmOptions, WalkEntry, WalkOptions } from "./client.js";
+export {
+  DeadlineExceededError,
+  MountosError,
+  POSIX_ERRNOS,
+  ProtocolError,
+  TooManyEntriesError,
+  TransportError,
+} from "./errors.js";
 export { FileType, OpenFlag } from "./api.js";
 export type { DirEntry, FileInfo, HelloResponse } from "./api.js";
 export type { StatfsInfo } from "./ops_gen.js";

@@ -3,6 +3,7 @@ package client
 
 import (
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,14 +15,29 @@ import (
 // DefaultPoolSize is the number of connections used when Options.PoolSize is 0.
 const DefaultPoolSize = 4
 
+// maxInflightCeiling bounds Options.MaxInflight.
+const maxInflightCeiling = 1024
+
+// DefaultMaxInflight is the most requests kept outstanding on one connection
+// when Options.MaxInflight is 0.
+const DefaultMaxInflight = 32
+
 // Options configures a Client.
 type Options struct {
 	PoolSize int // connections to open, DefaultPoolSize when 0
 
+	// MaxInflight is the most requests kept outstanding on one connection,
+	// DefaultMaxInflight when 0. The limit in force is the lower of this and
+	// the server's max_inflight. A server that does not report the "pipelining"
+	// capability gets one request at a time, and so does a value of 1.
+	MaxInflight int
+
 	// CallTimeout bounds every request. 0 means no limit. A request that gets no
-	// reply in time returns a *TimeoutError, and its connection is closed and
-	// dialed again on the next call. A multi-frame call, such as a large
-	// File.ReadAt, applies the limit to each frame.
+	// reply in time returns a *TimeoutError. When the connection allows several
+	// requests in flight, only that call fails and the late reply is discarded.
+	// Otherwise the connection is closed and dialed again on the next call. A
+	// multi-frame call, such as a large File.ReadAt, applies the limit to each
+	// frame.
 	CallTimeout time.Duration
 
 	// Logger receives diagnostic lines: events that no listener took, dropped
@@ -36,7 +52,8 @@ type Client struct {
 	hub         *hub
 	conns       []*conn
 	next        atomic.Uint64
-	free        chan struct{} // a token per released connection, wakes acquire
+	free        chan struct{} // a token per released slot, wakes acquire
+	maxInflight int
 	callTimeout time.Duration
 	caps        atomic.Pointer[map[string]struct{}] // capabilities the server reported. nil or empty means all.
 	mu          sync.Mutex
@@ -52,16 +69,20 @@ func Dial(path string, opts Options) (*Client, error) {
 	if n <= 0 {
 		n = DefaultPoolSize
 	}
+	inflight := min(opts.MaxInflight, maxInflightCeiling)
+	if inflight <= 0 {
+		inflight = DefaultMaxInflight
+	}
 	cl := &Client{
 		path: path, hub: newHub(opts.Logger), closedCh: make(chan struct{}),
-		free: make(chan struct{}, n), callTimeout: opts.CallTimeout,
+		free: make(chan struct{}, n*inflight), maxInflight: inflight, callTimeout: opts.CallTimeout,
 	}
 	for i := 0; i < n; i++ {
 		c := &conn{cl: cl, path: path}
 		cl.conns = append(cl.conns, c)
-		c.lock()
-		err := c.ensure()
-		c.unlock()
+		c.mu.Lock()
+		_, err := c.ensure()
+		c.mu.Unlock()
 		if err != nil {
 			cl.Close()
 			return nil, err
@@ -84,9 +105,9 @@ func (cl *Client) Close() error {
 			c.shutdown()
 		}
 		for _, c := range cl.conns {
-			c.lock()
+			c.mu.Lock()
 			c.drop()
-			c.unlock()
+			c.mu.Unlock()
 		}
 		cl.hub.closeWatches()
 		cl.hub.shutdown()
@@ -100,26 +121,50 @@ func (cl *Client) isClosed() bool {
 	return cl.closed
 }
 
-// acquire locks the first free connection, scanning from a rotating start.
-// When all are busy it waits until any connection is released, so a call never
-// queues behind a slow request while another connection is free.
-func (cl *Client) acquire() *conn {
+// acquire reserves one in-flight slot on the least loaded connection and
+// returns its socket. Ties go to a rotating start. When every connection is at
+// its limit it waits until any slot frees, so a call never queues behind a
+// slow request while another connection has room. The caller calls release.
+func (cl *Client) acquire() (*sock, error) {
 	n := uint64(len(cl.conns))
 	for {
+		if cl.isClosed() {
+			return nil, ErrClientClosed
+		}
 		start := cl.next.Add(1)
+		var best *conn
+		bestLoad := 0
 		for i := uint64(0); i < n; i++ {
-			if c := cl.conns[(start+i)%n]; c.mu.TryLock() {
-				return c
+			c := cl.conns[(start+i)%n]
+			if load, room := c.load(); room && (best == nil || load < bestLoad) {
+				best, bestLoad = c, load
 			}
 		}
+		if best == nil {
+			select {
+			case <-cl.free:
+			case <-cl.closedCh:
+			}
+			continue
+		}
+		sk, err := best.session()
+		if err != nil {
+			return nil, err
+		}
 		select {
-		case <-cl.free:
-		case <-cl.closedCh:
-			c := cl.conns[start%n]
-			c.lock()
-			return c
+		case sk.slots <- struct{}{}:
+			return sk, nil
+		default: // another caller took the room
 		}
 	}
+}
+
+// inflightLimit is the requests allowed at once on a connection, from the Hello reply.
+func (cl *Client) inflightLimit(resp *wire.HelloResponse) int {
+	if !slices.Contains(resp.GetCapabilities(), capPipelining) {
+		return 1
+	}
+	return int(max(1, min(uint32(cl.maxInflight), resp.GetMaxInflight())))
 }
 
 // setCaps records the capabilities from Hello.
@@ -157,12 +202,12 @@ func (cl *Client) run(method uint16, req, resp proto.Message) error {
 	if cl.isClosed() {
 		return ErrClientClosed
 	}
-	c := cl.acquire()
-	defer c.unlock()
-	if err := c.ensure(); err != nil {
+	sk, err := cl.acquire()
+	if err != nil {
 		return err
 	}
-	_, err := c.call(method, req, resp, nil)
+	defer sk.release()
+	_, err = sk.call(method, req, resp, nil)
 	return err
 }
 
@@ -175,21 +220,21 @@ func (cl *Client) Open(path string, flags wire.OpenFlag, mode uint32) (*File, er
 	if cl.isClosed() {
 		return nil, ErrClientClosed
 	}
-	c := cl.acquire()
-	defer c.unlock()
-	return cl.openLocked(c, path, flags, mode)
+	sk, err := cl.acquire()
+	if err != nil {
+		return nil, err
+	}
+	defer sk.release()
+	return cl.openOn(sk, path, flags, mode)
 }
 
-// openLocked opens path on c. Caller holds c's lock.
-func (cl *Client) openLocked(c *conn, path string, flags wire.OpenFlag, mode uint32) (*File, error) {
-	if err := c.ensure(); err != nil {
-		return nil, err
-	}
+// openOn opens path on sk. The caller holds a slot of sk.
+func (cl *Client) openOn(sk *sock, path string, flags wire.OpenFlag, mode uint32) (*File, error) {
 	var r wire.OpenResponse
-	if _, err := c.call(mOpen, &wire.OpenRequest{Path: path, Flags: uint32(flags), Mode: mode}, &r, nil); err != nil {
+	if _, err := sk.call(mOpen, &wire.OpenRequest{Path: path, Flags: uint32(flags), Mode: mode}, &r, nil); err != nil {
 		return nil, err
 	}
-	return &File{cl: cl, c: c, gen: c.gen, max: c.maxData, handle: r.GetHandle(), path: path, flags: flags}, nil
+	return &File{cl: cl, sk: sk, max: sk.maxData, handle: r.GetHandle(), path: path, flags: flags}, nil
 }
 
 // DirEntry is one directory entry. Info is set when the server returns attributes.
@@ -225,14 +270,14 @@ func (cl *Client) Opendir(path string) (*Dir, error) {
 	if cl.isClosed() {
 		return nil, ErrClientClosed
 	}
-	c := cl.acquire()
-	defer c.unlock()
-	if err := c.ensure(); err != nil {
+	sk, err := cl.acquire()
+	if err != nil {
 		return nil, err
 	}
+	defer sk.release()
 	var r wire.OpendirResponse
-	if _, err := c.call(mOpendir, &wire.OpendirRequest{Path: path}, &r, nil); err != nil {
+	if _, err := sk.call(mOpendir, &wire.OpendirRequest{Path: path}, &r, nil); err != nil {
 		return nil, err
 	}
-	return &Dir{cl: cl, c: c, gen: c.gen, handle: r.GetHandle()}, nil
+	return &Dir{cl: cl, sk: sk, handle: r.GetHandle()}, nil
 }

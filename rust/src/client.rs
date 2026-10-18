@@ -5,17 +5,16 @@ use crate::file::File;
 use crate::frame::{self, Frame, FLAG_ERROR, FLAG_NOTIFY, FLAG_RESPONSE, MAX_PAYLOAD_BYTES};
 use crate::wire::*;
 use prost::Message;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Client settings.
 #[derive(Clone)]
@@ -27,13 +26,22 @@ pub struct Options {
   /// The line has no prefix and no newline. When `None`, lines go to stderr with the prefix
   /// "mountos: ". Pass your own function to route them elsewhere.
   pub logger: Option<Logger>,
-  /// Longest a single request may take, from the first byte sent to the reply. `Duration::ZERO`
-  /// (the default) means no limit. A call that runs over fails with `Error::Timeout` and its
-  /// connection is dropped and dialed again on the next call, so a late reply cannot reach
-  /// another call. Files and watches on that connection are gone. A call that sends several
+  /// Longest a single request may take, from the end of the send to the reply. `Duration::ZERO`
+  /// (the default) means no limit. A call that runs over fails with `Error::Timeout`. When the
+  /// connection pipelines, only that call fails: its id is marked abandoned and the late reply is
+  /// dropped. Otherwise, or when too many ids are abandoned, the connection is dropped and dialed
+  /// again on the next call, and its files and watches are gone. A call that sends several
   /// requests (a large read or write) gets the limit for each request.
   pub call_timeout: Duration,
+  /// Most requests outstanding on one connection when the server pipelines. The server limit
+  /// (`max_inflight` in its Hello reply) also applies. Values are held between 1 and 1024. A
+  /// server without the pipelining capability gets one request at a time.
+  pub max_inflight: usize,
 }
+
+/// Default for `Options::max_inflight`.
+pub const DEFAULT_MAX_INFLIGHT: usize = 32;
+const MAX_INFLIGHT_CEILING: usize = 1024;
 
 /// Alias of `Options`.
 pub type ClientOptions = Options;
@@ -45,6 +53,7 @@ impl Default for Options {
       client_name: concat!("mountos-native-rust/", env!("CARGO_PKG_VERSION")).into(),
       logger: None,
       call_timeout: Duration::ZERO,
+      max_inflight: DEFAULT_MAX_INFLIGHT,
     }
   }
 }
@@ -56,6 +65,7 @@ impl fmt::Debug for Options {
       .field("client_name", &self.client_name)
       .field("logger", &self.logger.as_ref().map(|_| "<fn>"))
       .field("call_timeout", &self.call_timeout)
+      .field("max_inflight", &self.max_inflight)
       .finish()
   }
 }
@@ -97,110 +107,226 @@ fn write_timeout(e: Error) -> Error {
 
 static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
 
-/// State shared between a connection and its reader thread.
-pub(crate) struct ConnShared {
-  id: u64,
-  /// Set when this side ends the connection on purpose.
-  closing: AtomicBool,
-  /// Set by the reader when the stream has ended.
-  dead: AtomicBool,
-  /// The server sent Closing, so the end that follows is expected.
-  saw_closing: AtomicBool,
-  /// Queue for the watch call in flight. The reader registers it before the call returns, so
-  /// no change notice that follows the reply is lost.
-  pub(crate) pending_watch: Mutex<Option<Arc<Chan>>>,
-  /// The only response the reader may accept. Cleared before delivering that response.
-  pending_reply: Mutex<Option<(u64, u16)>>,
-  /// Second handle on the socket, used to cut it from another thread.
-  killer: UnixStream,
+/// One request in flight. The caller waits on it, the reader fills it.
+struct Waiter {
+  method: u16,
+  /// Queue that receives the notices of a watch started by this request.
+  watch: Option<Arc<Chan>>,
+  out: Mutex<Option<Result<Frame>>>,
+  cv: Condvar,
 }
 
-impl ConnShared {
-  fn kill(&self) {
-    self.closing.store(true, Ordering::SeqCst);
-    let _ = self.killer.shutdown(Shutdown::Both);
+impl Waiter {
+  fn set(&self, r: Result<Frame>) {
+    *lock(&self.out) = Some(r);
+    self.cv.notify_one();
+  }
+
+  /// Waits for the result. `None` means the deadline passed first.
+  fn wait(&self, deadline: Option<Instant>) -> Option<Result<Frame>> {
+    let mut g = lock(&self.out);
+    loop {
+      if let Some(r) = g.take() {
+        return Some(r);
+      }
+      g = match deadline {
+        None => self.cv.wait(g).unwrap_or_else(|e| e.into_inner()),
+        Some(d) => {
+          let left = d.saturating_duration_since(Instant::now());
+          if left.is_zero() {
+            return None;
+          }
+          self.cv.wait_timeout(g, left).unwrap_or_else(|e| e.into_inner()).0
+        }
+      };
+    }
   }
 }
 
-/// One handshaken connection. The server runs one request at a time on it. A reader thread
-/// reads every frame: replies go to the waiting call, notices go to the hub.
-pub(crate) struct Conn {
-  stream: UnixStream,
-  rx: Receiver<Result<Frame>>,
-  pub(crate) shared: Arc<ConnShared>,
-  reader: Option<JoinHandle<()>>,
-  pub(crate) next_id: u64,
-  /// Largest payload per frame, from the Hello reply.
-  pub(crate) max_payload: usize,
-  /// Per-request limit, zero for none.
-  timeout: Duration,
+#[derive(Default)]
+struct Core {
+  pending: HashMap<u64, Arc<Waiter>>,
+  /// Ids whose caller gave up, with the method. A late reply is dropped (an Open, Opendir or
+  /// Watch reply also releases what it created).
+  abandoned: HashMap<u64, u16>,
+  next_id: u64,
+  /// Why the connection ended. Set once.
+  end: Option<Error>,
+}
+
+/// What the Hello reply settled.
+struct Info {
+  max_payload: usize,
+  /// Requests that may be outstanding at once.
+  limit: usize,
   /// Capabilities the server reported. `None` when it reported none (an older server), which
   /// allows every call.
   caps: Option<HashSet<String>>,
 }
 
-impl Conn {
-  pub(crate) fn connect(path: &Path, name: &str, hub: &Arc<Hub>, timeout: Duration) -> Result<Conn> {
+/// One handshaken connection. Calls from many threads overlap up to the limit. Request frames are
+/// written under a mutex. One reader thread reads every frame: replies go to the waiting call by
+/// request id, notices go to the hub.
+pub(crate) struct Sock {
+  id: u64,
+  hub: Arc<Hub>,
+  /// Per-request limit, zero for none.
+  timeout: Duration,
+  writer: Mutex<UnixStream>,
+  /// Second handle on the socket. Closes the socket from another thread.
+  killer: UnixStream,
+  core: Mutex<Core>,
+  dead: AtomicBool,
+  /// Set when this side ends the connection on purpose.
+  closing: AtomicBool,
+  /// The server sent Closing, so the end that follows is expected.
+  saw_closing: AtomicBool,
+  info: OnceLock<Info>,
+  reader: Mutex<Option<JoinHandle<()>>>,
+  /// Threads that release a handle or watch created by a request that timed out.
+  releasers: Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl Sock {
+  /// Connects and starts the reader. The handshake is separate so a caller can register the
+  /// socket for `close` before it blocks.
+  fn open(path: &Path, hub: &Arc<Hub>, timeout: Duration) -> Result<Arc<Sock>> {
     let stream = UnixStream::connect(path)?;
     if !timeout.is_zero() {
       stream.set_write_timeout(Some(timeout))?;
     }
-    let shared = Arc::new(ConnShared {
+    let (rs, killer) = (stream.try_clone()?, stream.try_clone()?);
+    let sock = Arc::new(Sock {
       id: CONN_SEQ.fetch_add(1, Ordering::SeqCst),
-      closing: AtomicBool::new(false),
+      hub: hub.clone(),
+      timeout,
+      writer: Mutex::new(stream),
+      killer,
+      core: Mutex::new(Core::default()),
       dead: AtomicBool::new(false),
+      closing: AtomicBool::new(false),
       saw_closing: AtomicBool::new(false),
-      pending_watch: Mutex::new(None),
-      pending_reply: Mutex::new(None),
-      killer: stream.try_clone()?,
+      info: OnceLock::new(),
+      reader: Mutex::new(None),
+      releasers: Mutex::new(Vec::new()),
     });
-    let (tx, rx) = sync_channel(1);
-    let (rs, rh, rsh) = (stream.try_clone()?, hub.clone(), shared.clone());
-    let guard = hub.thread_guard();
-    let reader = std::thread::Builder::new()
+    let (rsock, guard) = (sock.clone(), hub.thread_guard());
+    let h = std::thread::Builder::new()
       .name("mountos-reader".into())
       .spawn(move || {
         let _guard = guard;
-        read_loop(rs, tx, &rh, &rsh)
+        read_loop(rs, &rsock)
       })?;
-    let mut c = Conn {
-      stream,
-      rx,
-      shared,
-      reader: Some(reader),
-      next_id: 0,
-      max_payload: MAX_PAYLOAD_BYTES as usize,
-      timeout,
-      caps: None,
-    };
+    *lock(&sock.reader) = Some(h);
+    Ok(sock)
+  }
+
+  fn handshake(&self, name: &str, max_inflight: usize) -> Result<()> {
     let req = HelloRequest {
       client_name: name.into(),
       min_version: 1,
       max_version: 1,
-      capabilities: vec![],
+      capabilities: vec!["pipelining".into()],
     };
-    let (resp, _): (HelloResponse, _) = c.call_msg(method::HELLO, &req, &[])?;
+    let (resp, _): (HelloResponse, _) = self.call_msg(method::HELLO, &req, &[])?;
     if resp.version != 1 {
       return Err(Error::Protocol(format!("server chose version {}", resp.version)));
     }
+    let mut max_payload = MAX_PAYLOAD_BYTES as usize;
     if resp.max_payload_bytes > 0 {
-      c.max_payload = c.max_payload.min(resp.max_payload_bytes as usize);
+      max_payload = max_payload.min(resp.max_payload_bytes as usize);
     }
-    if !resp.capabilities.is_empty() {
-      c.caps = Some(resp.capabilities.into_iter().collect());
-    }
-    Ok(c)
+    let pipelined = resp.capabilities.iter().any(|c| c == "pipelining");
+    let limit = if pipelined {
+      max_inflight.min(resp.max_inflight as usize).max(1)
+    } else {
+      1
+    };
+    let caps = (!resp.capabilities.is_empty()).then(|| resp.capabilities.into_iter().collect());
+    let _ = self.info.set(Info {
+      max_payload,
+      limit,
+      caps,
+    });
+    Ok(())
+  }
+
+  pub(crate) fn max_payload(&self) -> usize {
+    self.info.get().map_or(MAX_PAYLOAD_BYTES as usize, |i| i.max_payload)
+  }
+
+  fn limit(&self) -> usize {
+    self.info.get().map_or(1, |i| i.limit)
   }
 
   fn is_dead(&self) -> bool {
-    self.shared.dead.load(Ordering::SeqCst)
+    self.dead.load(Ordering::SeqCst)
+  }
+
+  /// Ends the connection once: the first reason wins. Every waiting call gets `end`.
+  fn fail(&self, end: Error, report: bool) {
+    let waiters: Vec<Arc<Waiter>> = {
+      let mut core = lock(&self.core);
+      if core.end.is_some() {
+        return;
+      }
+      core.end = Some(end.dup());
+      self.dead.store(true, Ordering::SeqCst);
+      core.abandoned.clear();
+      core.pending.drain().map(|(_, w)| w).collect()
+    };
+    let _ = self.killer.shutdown(Shutdown::Both);
+    for w in waiters {
+      w.set(Err(end.dup()));
+    }
+    self.hub.conn_lost(self.id);
+    let expected = self.closing.load(Ordering::SeqCst) || self.saw_closing.load(Ordering::SeqCst);
+    if report && !expected {
+      self
+        .hub
+        .publish(None, Event::local(EventKind::ConnectionLost, 0, Some(end.dup())));
+    }
+  }
+
+  /// Ends the connection on purpose.
+  pub(crate) fn kill(&self) {
+    self.closing.store(true, Ordering::SeqCst);
+    self.fail(aborted("connection closed"), false);
+  }
+
+  /// Ends the connection because of a local fault. Waiting calls get a copy of `e`.
+  fn kill_with(&self, e: &Error) {
+    self.closing.store(true, Ordering::SeqCst);
+    self.fail(e.dup(), false);
+  }
+
+  /// Ends the connection and joins its threads.
+  fn finish(&self) {
+    self.kill();
+    let reader = lock(&self.reader).take();
+    if let Some(h) = reader {
+      join_other(h);
+    }
+    let releasers = std::mem::take(&mut *lock(&self.releasers));
+    for h in releasers {
+      join_other(h);
+    }
+  }
+
+  fn forget(&self, id: u64) {
+    lock(&self.core).pending.remove(&id);
   }
 
   /// Sends one request and waits for its response frame. The sizes and the capability are
   /// checked before anything is sent, so those failures leave the connection intact.
-  fn call(&mut self, method: u16, req: &impl Message, payload: &[u8]) -> Result<Frame> {
+  fn call(&self, method: u16, req: &impl Message, payload: &[u8], watch: Option<Arc<Chan>>) -> Result<Frame> {
     if let Some(cap) = required_capability(method) {
-      if self.caps.as_ref().is_some_and(|c| !c.contains(cap)) {
+      if self
+        .info
+        .get()
+        .and_then(|i| i.caps.as_ref())
+        .is_some_and(|c| !c.contains(cap))
+      {
         return Err(Error::server(
           "UNSUPPORTED_OPERATION",
           &format!("the server does not report capability {cap}"),
@@ -209,32 +335,46 @@ impl Conn {
     }
     let meta = req.encode_to_vec();
     frame::check_limits(meta.len(), payload.len())?;
-    self.next_id += 1;
-    let id = self.next_id;
-    *lock(&self.shared.pending_reply) = Some((id, method));
-    frame::write_parts(&mut self.stream, 0, method, id, &meta, payload).map_err(write_timeout)?;
-    let resp = if self.timeout.is_zero() {
-      self.rx.recv().map_err(|_| aborted("server closed the connection"))??
-    } else {
-      match self.rx.recv_timeout(self.timeout) {
-        Ok(r) => r?,
-        Err(RecvTimeoutError::Timeout) => {
-          return Err(Error::Timeout(format!(
-            "method {method} did not finish within {:?}",
-            self.timeout
-          )))
-        }
-        Err(RecvTimeoutError::Disconnected) => return Err(aborted("server closed the connection")),
+    let w = Arc::new(Waiter {
+      method,
+      watch,
+      out: Mutex::new(None),
+      cv: Condvar::new(),
+    });
+    let id = {
+      let mut core = lock(&self.core);
+      if let Some(e) = &core.end {
+        return Err(e.dup());
       }
+      core.next_id += 1;
+      let id = core.next_id;
+      core.pending.insert(id, w.clone());
+      id
     };
-    if resp.flags & FLAG_RESPONSE == 0 || resp.request_id != id || resp.method != method {
-      return Err(Error::Protocol(format!(
-        "unexpected frame: method {} id {}",
-        resp.method, resp.request_id
-      )));
+    let sent = {
+      let mut s = lock(&self.writer);
+      frame::write_parts(&mut *s, 0, method, id, &meta, payload).map_err(write_timeout)
+    };
+    if let Err(e) = sent {
+      // A failed write may leave half a frame on the wire, so the connection is unusable.
+      self.forget(id);
+      self.kill_with(&aborted(&format!("send failed: {e}")));
+      return Err(e);
     }
+    let deadline = (!self.timeout.is_zero()).then(|| Instant::now() + self.timeout);
+    let resp = match w.wait(deadline) {
+      Some(r) => r?,
+      None => self.give_up(id, method, &w)?,
+    };
     if resp.flags & FLAG_ERROR != 0 {
-      let e = WireError::decode(&resp.meta[..]).map_err(|e| Error::Protocol(format!("bad error meta: {e}")))?;
+      let e = match WireError::decode(&resp.meta[..]) {
+        Ok(e) => e,
+        Err(e) => {
+          let e = Error::Protocol(format!("bad error meta: {e}"));
+          self.kill_with(&e);
+          return Err(e);
+        }
+      };
       return Err(Error::Server {
         code: e.code,
         message: e.message,
@@ -243,48 +383,150 @@ impl Conn {
     Ok(resp)
   }
 
+  /// Handles a call whose wait ran out. With room in the abandoned set the connection stays up
+  /// and the late reply is dropped. Otherwise the connection is cut.
+  fn give_up(&self, id: u64, method: u16, w: &Waiter) -> Result<Frame> {
+    let limit = self.limit();
+    let kept = {
+      let mut core = lock(&self.core);
+      if core.pending.remove(&id).is_none() {
+        None
+      } else if limit > 1 && core.abandoned.len() < limit * 4 {
+        core.abandoned.insert(id, method);
+        Some(true)
+      } else {
+        Some(false)
+      }
+    };
+    match kept {
+      // The reply or the failure won the race and is being delivered.
+      None => w.wait(None).unwrap_or_else(|| Err(aborted("connection closed"))),
+      Some(keep) => {
+        if !keep {
+          self.kill();
+        }
+        Err(Error::Timeout(format!(
+          "method {method} did not finish within {:?}",
+          self.timeout
+        )))
+      }
+    }
+  }
+
   /// Like `call`, decoding the meta as `R` and returning the reply payload.
   pub(crate) fn call_msg<R: Message + Default>(
-    &mut self,
+    &self,
     method: u16,
     req: &impl Message,
     payload: &[u8],
   ) -> Result<(R, Vec<u8>)> {
-    let resp = self.call(method, req, payload)?;
-    let msg = R::decode(&resp.meta[..]).map_err(|e| Error::Protocol(format!("bad response meta: {e}")))?;
-    Ok((msg, resp.payload))
+    self.decode(self.call(method, req, payload, None)?)
   }
-}
 
-impl Drop for Conn {
-  fn drop(&mut self) {
-    if !self.is_dead() {
-      self.shared.kill();
+  /// Starts a watch. The reader routes the notices of the new watch to `chan` before the call returns.
+  pub(crate) fn call_watch(&self, req: &WatchRequest, chan: Arc<Chan>) -> Result<WatchResponse> {
+    Ok(self.decode(self.call(method::WATCH, req, &[], Some(chan))?)?.0)
+  }
+
+  fn decode<R: Message + Default>(&self, resp: Frame) -> Result<(R, Vec<u8>)> {
+    match R::decode(&resp.meta[..]) {
+      Ok(msg) => Ok((msg, resp.payload)),
+      Err(e) => {
+        let e = Error::Protocol(format!("bad response meta: {e}"));
+        self.kill_with(&e);
+        Err(e)
+      }
     }
-    let _ = self.stream.shutdown(Shutdown::Both);
-    if let Some(h) = self.reader.take() {
-      join_other(h);
+  }
+
+  /// Routes one non-notice frame from the reader. An error is a protocol violation.
+  fn deliver(self: &Arc<Self>, hub: &Hub, f: Frame) -> Result<()> {
+    let unexpected = |f: &Frame| Error::Protocol(format!("unexpected frame: method {} id {}", f.method, f.request_id));
+    if f.flags & FLAG_RESPONSE == 0 {
+      return Err(unexpected(&f));
+    }
+    let waiter = {
+      let mut core = lock(&self.core);
+      match core.pending.get(&f.request_id).map(|w| w.method) {
+        Some(m) if m == f.method => core.pending.remove(&f.request_id),
+        Some(_) => return Err(unexpected(&f)),
+        None => {
+          if core.abandoned.get(&f.request_id) != Some(&f.method) {
+            return Err(unexpected(&f));
+          }
+          core.abandoned.remove(&f.request_id);
+          None
+        }
+      }
+    };
+    let ok = f.flags & (FLAG_RESPONSE | FLAG_ERROR) == FLAG_RESPONSE;
+    match waiter {
+      Some(w) => {
+        if ok && f.method == method::WATCH {
+          if let (Ok(r), Some(chan)) = (WatchResponse::decode(&f.meta[..]), &w.watch) {
+            hub.add_watch(r.watch_id, self.id, chan.clone());
+          }
+        }
+        w.set(Ok(f));
+      }
+      None if ok => self.release_late(f),
+      None => {}
+    }
+    Ok(())
+  }
+
+  /// A reply arrived for a request nobody waits for. An Open, Opendir or Watch created a server
+  /// resource, so a thread frees it. The reader never writes: it must keep reading.
+  fn release_late(self: &Arc<Self>, f: Frame) {
+    let job: Box<dyn FnOnce(&Sock) + Send> = match f.method {
+      method::OPEN => match OpenResponse::decode(&f.meta[..]) {
+        Ok(r) => Box::new(move |s| drop(s.call_msg::<Empty>(method::CLOSE, &CloseRequest { handle: r.handle }, &[]))),
+        Err(_) => return,
+      },
+      method::OPENDIR => match OpendirResponse::decode(&f.meta[..]) {
+        Ok(r) => {
+          Box::new(move |s| drop(s.call_msg::<Empty>(method::CLOSEDIR, &ClosedirRequest { handle: r.handle }, &[])))
+        }
+        Err(_) => return,
+      },
+      method::WATCH => match WatchResponse::decode(&f.meta[..]) {
+        Ok(r) => {
+          Box::new(move |s| drop(s.call_msg::<Empty>(method::UNWATCH, &UnwatchRequest { watch_id: r.watch_id }, &[])))
+        }
+        Err(_) => return,
+      },
+      _ => return,
+    };
+    if self.is_dead() {
+      return;
+    }
+    let (sock, guard) = (self.clone(), self.hub.thread_guard());
+    let spawned = std::thread::Builder::new()
+      .name("mountos-release".into())
+      .spawn(move || {
+        let _guard = guard;
+        job(&sock)
+      });
+    match spawned {
+      Ok(h) => {
+        let mut rs = lock(&self.releasers);
+        rs.retain(|h| !h.is_finished());
+        rs.push(h);
+      }
+      Err(e) => self.hub.log(&format!("could not start release of a late reply: {e}")),
     }
   }
 }
 
 /// Reads frames until the stream ends. Replies go to the waiting call, notices to the hub.
-fn read_loop(mut s: UnixStream, tx: SyncSender<Result<Frame>>, hub: &Hub, cs: &ConnShared) {
+fn read_loop(mut s: UnixStream, sock: &Arc<Sock>) {
+  let hub = sock.hub.clone();
   let end = loop {
     match frame::read(&mut s) {
-      Ok(Some(f)) if f.flags & FLAG_NOTIFY != 0 => on_notice(f, hub, cs),
+      Ok(Some(f)) if f.flags & FLAG_NOTIFY != 0 => on_notice(f, &hub, sock),
       Ok(Some(f)) => {
-        let pending = lock(&cs.pending_reply).take();
-        if pending != Some((f.request_id, f.method)) || f.flags & FLAG_RESPONSE == 0 {
-          break Error::Protocol(format!("unexpected frame: method {} id {}", f.method, f.request_id));
-        }
-        if f.flags & (FLAG_RESPONSE | FLAG_ERROR) == FLAG_RESPONSE && f.method == method::WATCH {
-          if let (Ok(r), Some(chan)) = (WatchResponse::decode(&f.meta[..]), lock(&cs.pending_watch).take()) {
-            hub.add_watch(r.watch_id, cs.id, chan);
-          }
-        }
-        if tx.try_send(Ok(f)).is_err() {
-          break aborted("connection dropped");
+        if let Err(e) = sock.deliver(&hub, f) {
+          break e;
         }
       }
       Ok(None) => break aborted("server closed the connection"),
@@ -292,16 +534,10 @@ fn read_loop(mut s: UnixStream, tx: SyncSender<Result<Frame>>, hub: &Hub, cs: &C
     }
   };
   let _ = s.shutdown(Shutdown::Both);
-  cs.dead.store(true, Ordering::SeqCst);
-  hub.conn_lost(cs.id);
-  let expected = cs.closing.load(Ordering::SeqCst) || cs.saw_closing.load(Ordering::SeqCst);
-  if !expected {
-    hub.publish(None, Event::local(EventKind::ConnectionLost, 0, Some(end.dup())));
-  }
-  let _ = tx.try_send(Err(end));
+  sock.fail(end, true);
 }
 
-fn on_notice(f: Frame, hub: &Hub, cs: &ConnShared) {
+fn on_notice(f: Frame, hub: &Hub, sock: &Sock) {
   if f.method != method::NOTICE {
     hub.log(&format!("ignored notify frame with method {}", f.method));
     return;
@@ -320,13 +556,13 @@ fn on_notice(f: Frame, hub: &Hub, cs: &ConnShared) {
     }
   };
   if ev.kind == EventKind::Closing {
-    cs.saw_closing.store(true, Ordering::SeqCst);
+    sock.saw_closing.store(true, Ordering::SeqCst);
   }
-  hub.publish(Some(cs.id), ev);
+  hub.publish(Some(sock.id), ev);
 }
 
 struct SlotState {
-  conn: Option<Conn>,
+  sock: Option<Arc<Sock>>,
   /// Counts connects. A file remembers it to detect that its handle died with the old connection.
   epoch: u64,
 }
@@ -386,111 +622,129 @@ impl Gate {
   }
 }
 
-/// Fair queue for one connection. Callers are served in arrival order, so a caller that runs
-/// request after request cannot starve one that waits. Holds (next ticket, ticket served).
-#[derive(Default)]
-struct Turnstile {
-  tickets: Mutex<(u64, u64)>,
-  cv: Condvar,
-}
+/// Holds one of a slot's request places until dropped, then wakes callers that wait for room.
+struct Permit<'a>(&'a Slot);
 
-/// Held while a request owns the connection. Dropping it serves the next caller and wakes the
-/// callers that wait for any free connection.
-struct Turn<'a>(&'a Slot);
-
-impl Drop for Turn<'_> {
+impl Drop for Permit<'_> {
   fn drop(&mut self) {
-    lock(&self.0.queue.tickets).1 += 1;
-    self.0.queue.cv.notify_all();
+    self.0.outstanding.fetch_sub(1, Ordering::SeqCst);
     self.0.gate.bump();
   }
 }
 
-/// A lazily connected pool entry. A request owns it for one round trip only, never across the
-/// chunks of a large operation.
+/// A lazily connected pool entry. Up to `limit` requests run on its connection at once. A
+/// request owns a place for one round trip only, never across the chunks of a large operation.
 pub(crate) struct Slot {
   path: PathBuf,
   name: String,
   timeout: Duration,
+  max_inflight: usize,
   hub: Arc<Hub>,
   gate: Arc<Gate>,
-  queue: Turnstile,
+  /// Requests that hold a place.
+  outstanding: AtomicUsize,
+  /// Places available. One until the Hello reply says more.
+  limit: AtomicUsize,
   closed: AtomicBool,
-  /// The current connection, reachable without the state lock so `close` can cut a call in flight.
-  live: Mutex<Option<Arc<ConnShared>>>,
+  /// The current connection, reachable without the state lock so `close` can cut a dial or a
+  /// call in flight.
+  live: Mutex<Option<Arc<Sock>>>,
   state: Mutex<SlotState>,
 }
 
 impl Slot {
-  /// Runs `f` on the connection, waiting for its turn. With `want`, fails if the connection is
-  /// not the one with that epoch. A broken connection is dropped so the next call reconnects.
-  pub(crate) fn run<T>(&self, want: Option<u64>, f: impl FnOnce(&mut Conn) -> Result<T>) -> Result<(T, u64)> {
+  fn try_reserve(&self) -> Option<Permit<'_>> {
+    let limit = self.limit.load(Ordering::SeqCst);
+    let mut cur = self.outstanding.load(Ordering::SeqCst);
+    loop {
+      if cur >= limit {
+        return None;
+      }
+      match self
+        .outstanding
+        .compare_exchange_weak(cur, cur + 1, Ordering::SeqCst, Ordering::SeqCst)
+      {
+        Ok(_) => return Some(Permit(self)),
+        Err(c) => cur = c,
+      }
+    }
+  }
+
+  /// Runs `f` on the connection once a place is free. With `want`, fails if the connection is
+  /// not the one with that epoch. A broken connection is replaced on the next call.
+  pub(crate) fn run<T>(&self, want: Option<u64>, f: impl FnOnce(&Sock) -> Result<T>) -> Result<(T, u64)> {
     self.gate.let_waiters_pass();
-    let mut q = lock(&self.queue.tickets);
-    let ticket = q.0;
-    q.0 += 1;
-    while q.1 != ticket {
-      q = self.queue.cv.wait(q).unwrap_or_else(|e| e.into_inner());
-    }
-    drop(q);
-    self.run_entered(want, f)
-  }
-
-  /// Takes a turn only when nobody holds or awaits the connection.
-  fn try_enter(&self) -> bool {
-    let mut q = lock(&self.queue.tickets);
-    if q.0 != q.1 {
-      return false;
-    }
-    q.0 += 1;
-    true
-  }
-
-  /// Runs `f` for a caller that already holds a turn and releases it at the end.
-  fn run_entered<T>(&self, want: Option<u64>, f: impl FnOnce(&mut Conn) -> Result<T>) -> Result<(T, u64)> {
-    let _turn = Turn(self);
-    let mut st = lock(&self.state);
-    self.exec(&mut st, want, f)
-  }
-
-  fn exec<T>(&self, st: &mut SlotState, want: Option<u64>, f: impl FnOnce(&mut Conn) -> Result<T>) -> Result<(T, u64)> {
-    if self.closed.load(Ordering::SeqCst) {
-      return Err(aborted("client closed"));
-    }
-    let alive = st.conn.as_ref().is_some_and(|c| !c.is_dead());
-    if want.is_some_and(|e| !alive || st.epoch != e) {
-      return Err(aborted("connection lost, file handle is gone"));
-    }
-    if !alive {
-      st.conn = None;
-      let c = Conn::connect(&self.path, &self.name, &self.hub, self.timeout)?;
-      *lock(&self.live) = Some(c.shared.clone());
+    let permit = loop {
+      let seen = self.gate.generation();
       if self.closed.load(Ordering::SeqCst) {
         return Err(aborted("client closed"));
       }
-      st.conn = Some(c);
-      st.epoch += 1;
-    }
-    let epoch = st.epoch;
-    let r = f(st.conn.as_mut().expect("connected above"));
-    if matches!(r, Err(Error::Io(_)) | Err(Error::Protocol(_)) | Err(Error::Timeout(_))) {
-      st.conn = None;
+      if let Some(p) = self.try_reserve() {
+        break p;
+      }
+      self.gate.wait_change(seen);
+    };
+    self.exec(permit, want, f)
+  }
+
+  /// Runs `f` for a caller that already holds a place and releases it at the end.
+  fn exec<T>(&self, _permit: Permit<'_>, want: Option<u64>, f: impl FnOnce(&Sock) -> Result<T>) -> Result<(T, u64)> {
+    let (sock, epoch) = self.sock_for(want)?;
+    let r = f(&sock);
+    if matches!(r, Err(Error::Io(_)) | Err(Error::Protocol(_))) {
+      sock.kill();
     }
     r.map(|v| (v, epoch))
   }
 
-  /// Refuses new calls and cuts the connection, which ends a call in flight.
+  /// The live connection, dialed when there is none.
+  fn sock_for(&self, want: Option<u64>) -> Result<(Arc<Sock>, u64)> {
+    let mut st = lock(&self.state);
+    if self.closed.load(Ordering::SeqCst) {
+      return Err(aborted("client closed"));
+    }
+    let alive = st.sock.as_ref().is_some_and(|s| !s.is_dead());
+    if want.is_some_and(|e| !alive || st.epoch != e) {
+      return Err(aborted("connection lost, file handle is gone"));
+    }
+    if !alive {
+      if let Some(old) = st.sock.take() {
+        old.finish();
+      }
+      let s = Sock::open(&self.path, &self.hub, self.timeout)?;
+      *lock(&self.live) = Some(s.clone());
+      let shaken = if self.closed.load(Ordering::SeqCst) {
+        Err(aborted("client closed"))
+      } else {
+        s.handshake(&self.name, self.max_inflight)
+      };
+      if let Err(e) = shaken {
+        s.finish();
+        return Err(e);
+      }
+      self.limit.store(s.limit(), Ordering::SeqCst);
+      st.sock = Some(s);
+      st.epoch += 1;
+      self.gate.bump();
+    }
+    Ok((st.sock.clone().expect("connected above"), st.epoch))
+  }
+
+  /// Refuses new calls and cuts the connection, which ends the calls in flight.
   fn close_start(&self) {
     self.closed.store(true, Ordering::SeqCst);
-    if let Some(cs) = lock(&self.live).as_ref() {
-      cs.kill();
+    if let Some(s) = lock(&self.live).as_ref() {
+      s.kill();
     }
     self.gate.bump();
   }
 
-  /// Drops the connection, which stops its reader.
+  /// Stops the connection's threads.
   fn close_finish(&self) {
-    lock(&self.state).conn = None;
+    let s = lock(&self.state).sock.take();
+    if let Some(s) = s {
+      s.finish();
+    }
   }
 }
 
@@ -551,12 +805,14 @@ impl Client {
           path: path.as_ref().to_path_buf(),
           name: opts.client_name.clone(),
           timeout: opts.call_timeout,
+          max_inflight: opts.max_inflight.clamp(1, MAX_INFLIGHT_CEILING),
           hub: hub.clone(),
           gate: gate.clone(),
-          queue: Turnstile::default(),
+          outstanding: AtomicUsize::new(0),
+          limit: AtomicUsize::new(1),
           closed: AtomicBool::new(false),
           live: Mutex::new(None),
-          state: Mutex::new(SlotState { conn: None, epoch: 0 }),
+          state: Mutex::new(SlotState { sock: None, epoch: 0 }),
         })
       })
       .collect();
@@ -589,26 +845,38 @@ impl Client {
     self.inner.slots.len()
   }
 
-  /// Runs `f` on the first connection that is free, starting the scan at a rotating position so
-  /// consecutive calls spread out. When all are busy it waits for whichever frees first. Returns
-  /// the slot and epoch the call ran on, for callers that bind a handle to it.
-  pub(crate) fn run_any<T>(&self, f: impl FnOnce(&mut Conn) -> Result<T>) -> Result<(T, &Arc<Slot>, u64)> {
+  /// Runs `f` on the connection with the fewest requests outstanding that has room. The scan
+  /// starts at a rotating position so equal choices spread out. When all are full it waits for whichever frees first. Returns the slot
+  /// and epoch the call ran on, for callers that bind a handle to it.
+  pub(crate) fn run_any<T>(&self, f: impl FnOnce(&Sock) -> Result<T>) -> Result<(T, &Arc<Slot>, u64)> {
     let inner = &*self.inner;
     let n = inner.slots.len();
     let mut waiter = None;
     loop {
       let seen = inner.gate.generation();
       let start = inner.next.fetch_add(1, Ordering::Relaxed) % n;
+      let mut best: Option<(&Arc<Slot>, usize)> = None;
       for i in 0..n {
         let slot = &inner.slots[(start + i) % n];
-        if slot.try_enter() {
-          drop(waiter);
-          let (v, epoch) = slot.run_entered(None, f)?;
-          return Ok((v, slot, epoch));
+        let out = slot.outstanding.load(Ordering::SeqCst);
+        if out >= slot.limit.load(Ordering::SeqCst) {
+          continue;
+        }
+        if best.as_ref().is_none_or(|(_, k)| out < *k) {
+          best = Some((slot, out));
         }
       }
+      if let Some((slot, _)) = best {
+        // Losing the race for the place means another caller took it, so scan again.
+        if let Some(permit) = slot.try_reserve() {
+          drop(waiter);
+          let (v, epoch) = slot.exec(permit, None, f)?;
+          return Ok((v, slot, epoch));
+        }
+        continue;
+      }
       if waiter.is_none() {
-        // Register, then scan once more: a connection may have freed in between.
+        // Register, then scan once more: a place may have freed in between.
         waiter = Some(inner.gate.wait_for_free());
         continue;
       }

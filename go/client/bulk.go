@@ -216,11 +216,14 @@ func overlaps(offsets []int64, lengths []int) bool {
 	return false
 }
 
-// fanout returns handles to the same file on other pooled connections, so batch
-// groups can run in parallel. f comes first. A handle counts only when its inode
-// equals f's, so a path that names another file is never used. When the
-// server gives no inode, or any step fails, the batch stays on f alone. The
-// caller holds f.mu and calls release on the result.
+// fanout returns handles to the same file, so batch groups can run in
+// parallel. f comes first. The server runs requests on one handle in order, so
+// parallel groups need their own handles. When the connection allows several
+// requests in flight, the extra handles live on f's connection. Otherwise they
+// live on other pooled connections. A handle counts only when its inode equals
+// f's, so a path that names another file is never used. When the server gives
+// no inode, or any step fails, the batch stays on f alone. The caller holds
+// f.mu and calls release on the result.
 func (f *File) fanout(groupCount int) []*File {
 	files := []*File{f}
 	want := min(groupCount, len(f.cl.conns))
@@ -231,24 +234,41 @@ func (f *File) fanout(groupCount int) []*File {
 	if err != nil || info.GetInode() == 0 {
 		return files
 	}
+	extra := func(sk *sock) {
+		if !sk.hold() {
+			return
+		}
+		sf, err := f.cl.openOn(sk, f.path, f.flags&3, 0)
+		sk.release()
+		if err != nil {
+			return
+		}
+		if si, err := sf.fstat(); err != nil || si.GetInode() != info.GetInode() {
+			sf.Close()
+			return
+		}
+		files = append(files, sf)
+	}
+	if f.sk.limit > 1 {
+		for len(files) < want && !f.sk.isDead() {
+			n := len(files)
+			extra(f.sk)
+			if len(files) == n {
+				break
+			}
+		}
+		return files
+	}
 	for _, c := range f.cl.conns {
 		if len(files) == want {
 			break
 		}
-		if c == f.c {
+		if c == f.sk.c {
 			continue
 		}
-		c.lock()
-		sf, err := f.cl.openLocked(c, f.path, f.flags&3, 0)
-		c.unlock()
-		if err != nil {
-			continue
+		if sk, err := c.session(); err == nil {
+			extra(sk)
 		}
-		if si, err := sf.fstat(); err != nil || si.GetInode() != info.GetInode() {
-			sf.Close()
-			continue
-		}
-		files = append(files, sf)
 	}
 	return files
 }
@@ -448,15 +468,14 @@ func (cl *Client) ReadFile(path string) ([]byte, error) {
 	if cl.isClosed() {
 		return nil, ErrClientClosed
 	}
-	c := cl.acquire()
-	if err := c.ensure(); err != nil {
-		c.unlock()
+	sk, err := cl.acquire()
+	if err != nil {
 		return nil, err
 	}
-	limit := c.maxData
+	limit := sk.maxData
 	var r wire.ReadFileResponse
-	data, err := c.call(mReadFile, &wire.ReadFileRequest{Path: path, MaxBytes: uint64(limit)}, &r, nil)
-	c.unlock()
+	data, err := sk.call(mReadFile, &wire.ReadFileRequest{Path: path, MaxBytes: uint64(limit)}, &r, nil)
+	sk.release()
 	if err != nil {
 		return nil, err
 	}
@@ -491,15 +510,14 @@ func (cl *Client) WriteFile(path string, data []byte, truncate bool) error {
 	if cl.isClosed() {
 		return ErrClientClosed
 	}
-	c := cl.acquire()
-	if err := c.ensure(); err != nil {
-		c.unlock()
+	sk, err := cl.acquire()
+	if err != nil {
 		return err
 	}
-	if len(data) <= c.maxData {
+	if len(data) <= sk.maxData {
 		var r wire.WriteFileResponse
-		_, err := c.call(mWriteFile, &wire.WriteFileRequest{Path: path, Truncate: truncate}, &r, data)
-		c.unlock()
+		_, err := sk.call(mWriteFile, &wire.WriteFileRequest{Path: path, Truncate: truncate}, &r, data)
+		sk.release()
 		if err != nil {
 			return err
 		}
@@ -508,7 +526,7 @@ func (cl *Client) WriteFile(path string, data []byte, truncate bool) error {
 		}
 		return nil
 	}
-	c.unlock()
+	sk.release()
 	flags := wire.OpenFlag_OPEN_FLAG_WRITE_ONLY | wire.OpenFlag_OPEN_FLAG_CREATE
 	if truncate {
 		flags |= wire.OpenFlag_OPEN_FLAG_TRUNC

@@ -42,3 +42,22 @@ export class DeadlineExceededError extends Error {
     this.name = "DeadlineExceededError";
   }
 }
+
+/**
+ * A directory helper hit its bound. `readDirAll` found more than `limit` entries, or `walk` went
+ * deeper than `limit` levels below its root. `code` is TOO_MANY_ENTRIES or WALK_TOO_DEEP.
+ */
+export class TooManyEntriesError extends Error {
+  constructor(
+    readonly code: "TOO_MANY_ENTRIES" | "WALK_TOO_DEEP",
+    readonly path: string,
+    readonly limit: number,
+  ) {
+    super(
+      code === "TOO_MANY_ENTRIES"
+        ? `${path} has more than ${limit} entries`
+        : `${path} is deeper than ${limit} levels`,
+    );
+    this.name = "TooManyEntriesError";
+  }
+}

@@ -11,8 +11,7 @@ import (
 // Dir is an open directory handle. It is bound to one connection. Calls on a Dir are serialized.
 type Dir struct {
 	cl     *Client
-	c      *conn
-	gen    uint64
+	sk     *sock
 	handle uint64
 
 	mu     sync.Mutex
@@ -49,11 +48,6 @@ func (d *Dir) do(method uint16, req, resp proto.Message) error {
 	if d.cl.isClosed() {
 		return ErrClientClosed
 	}
-	d.c.lock()
-	defer d.c.unlock()
-	if !d.c.alive() || d.c.gen != d.gen {
-		return ErrConnLost
-	}
-	_, err := d.c.call(method, req, resp, nil)
+	_, err := d.sk.callWait(method, req, resp, nil)
 	return err
 }

@@ -276,3 +276,63 @@ func TestAppendRejectsOverLimitAndKeepsDst(t *testing.T) {
 		t.Fatalf("got %q, %v", got, err)
 	}
 }
+
+func TestReadAllocMatchesRead(t *testing.T) {
+	lim := Limits{MaxMetaBytes: 1 << 20, MaxPayloadBytes: 8 << 20}
+	for _, n := range []int{0, 1, readChunk, readChunk + 1, 300_000, 5 << 20} {
+		payload := bytes.Repeat([]byte{byte(n), 5, 9}, n/3+1)[:n]
+		var enc bytes.Buffer
+		if err := Write(&enc, Frame{Method: 3, RequestID: 8, Meta: []byte("m"), Payload: payload}, lim); err != nil {
+			t.Fatal(err)
+		}
+		var asked []int
+		got, err := ReadAlloc(bytes.NewReader(enc.Bytes()), lim, func(sz int) []byte {
+			asked = append(asked, sz)
+			// Dirty, oversized slices: ReadAlloc must neither trust the contents nor the length.
+			b := bytes.Repeat([]byte{0xAA}, sz+17)
+			return b[:3]
+		})
+		if err != nil || !bytes.Equal(got.Payload, payload) || got.Method != 3 || got.RequestID != 8 || string(got.Meta) != "m" {
+			t.Fatalf("n=%d: ReadAlloc = %+v, %v", n, got, err)
+		}
+		if n == 0 && len(asked) != 0 {
+			t.Fatalf("empty payload asked for %v", asked)
+		}
+		if n > 0 && n <= readChunk && (len(asked) != 1 || asked[0] != n) {
+			t.Fatalf("n=%d: asked %v", n, asked)
+		}
+		if n > readChunk && asked[0] != readChunk {
+			t.Fatalf("n=%d: first ask %d, want %d", n, asked[0], readChunk)
+		}
+	}
+}
+
+func TestReadAllocSmallCapacityFallsBack(t *testing.T) {
+	lim := Limits{MaxMetaBytes: 1 << 10, MaxPayloadBytes: 1 << 20}
+	payload := bytes.Repeat([]byte{4}, 200_000)
+	var enc bytes.Buffer
+	if err := Write(&enc, Frame{Payload: payload}, lim); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadAlloc(&enc, lim, func(int) []byte { return make([]byte, 1) })
+	if err != nil || !bytes.Equal(got.Payload, payload) {
+		t.Fatalf("fallback read failed: %v", err)
+	}
+}
+
+func TestReadAllocStalledClaimAsksForReceivedSizeOnly(t *testing.T) {
+	lim := Limits{MaxMetaBytes: 1 << 10, MaxPayloadBytes: 8 << 20}
+	var buf bytes.Buffer
+	hdr := [HeaderSize]byte{'M', 'F', 'S', '1', Version}
+	hdr[20], hdr[21] = 0x00, 0x80 // payload length 8 MiB
+	buf.Write(hdr[:])
+	buf.Write(make([]byte, 100)) // the peer sends 100 bytes and stops
+	var asked []int
+	_, err := ReadAlloc(&buf, lim, func(n int) []byte { asked = append(asked, n); return make([]byte, n) })
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("err = %v, want unexpected EOF", err)
+	}
+	if len(asked) != 1 || asked[0] != readChunk {
+		t.Fatalf("asked %v, want only %d", asked, readChunk)
+	}
+}

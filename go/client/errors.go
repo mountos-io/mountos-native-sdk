@@ -76,10 +76,15 @@ const (
 )
 
 // TimeoutError reports a call that did not finish within Options.CallTimeout.
-// The client drops the connection, so a late reply cannot match another call.
-// A File opened on that connection returns ErrConnLost afterward.
+// On a connection that allows several requests in flight, only that call
+// fails. Its request id is marked abandoned and the late reply is discarded.
+// When too many abandoned ids pile up, and on a connection that allows one
+// request at a time, the client drops the connection and dials it again. A
+// File opened on a dropped connection returns ErrConnLost afterward.
 type TimeoutError struct {
 	After time.Duration
+
+	kept bool // the connection stays open
 }
 
 func (e *TimeoutError) Error() string {

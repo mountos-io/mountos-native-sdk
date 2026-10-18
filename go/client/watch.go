@@ -14,11 +14,9 @@ const watchBuffer = 256
 // Watch call, and ends when that connection closes. Events is a filtered
 // view of the client events for this watch.
 type Watch struct {
-	cl  *Client
-	c   *conn
-	sk  *sock
-	ch  chan Event
-	gen uint64
+	cl *Client
+	sk *sock
+	ch chan Event
 
 	mu      sync.Mutex
 	id      uint64
@@ -36,15 +34,15 @@ func (cl *Client) Watch(path string, recursive bool, since uint64) (*Watch, erro
 	if cl.isClosed() {
 		return nil, ErrClientClosed
 	}
-	c := cl.acquire()
-	defer c.unlock()
-	if err := c.ensure(); err != nil {
+	sk, err := cl.acquire()
+	if err != nil {
 		return nil, err
 	}
-	w := &Watch{cl: cl, c: c, sk: c.sk, gen: c.gen, ch: make(chan Event, watchBuffer)}
+	defer sk.release()
+	w := &Watch{cl: cl, sk: sk, ch: make(chan Event, watchBuffer)}
 	cl.hub.addWatch(w)
 	var r wire.WatchResponse
-	if _, err := c.call(mWatch, &wire.WatchRequest{Path: path, Recursive: recursive, SinceSequence: since}, &r, nil); err != nil {
+	if _, err := sk.call(mWatch, &wire.WatchRequest{Path: path, Recursive: recursive, SinceSequence: since}, &r, nil); err != nil {
 		cl.hub.removeWatch(w)
 		return nil, err
 	}
@@ -74,12 +72,8 @@ func (w *Watch) Events() <-chan Event { return w.ch }
 // is safe to call more than once.
 func (w *Watch) Close() error {
 	var err error
-	if !w.cl.isClosed() {
-		w.c.lock()
-		if w.c.sk == w.sk && w.c.alive() {
-			_, err = w.c.call(mUnwatch, &wire.UnwatchRequest{WatchId: w.ID()}, &wire.Empty{}, nil)
-		}
-		w.c.unlock()
+	if !w.cl.isClosed() && !w.sk.isDead() {
+		_, err = w.sk.callWait(mUnwatch, &wire.UnwatchRequest{WatchId: w.ID()}, &wire.Empty{}, nil)
 	}
 	w.finish()
 	var we *WireError

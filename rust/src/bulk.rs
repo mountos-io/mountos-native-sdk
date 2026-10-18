@@ -124,7 +124,7 @@ impl Client {
       .run_any(|c| {
         let req = ReadFileRequest {
           path: path.into(),
-          max_bytes: c.max_payload as u64,
+          max_bytes: c.max_payload() as u64,
         };
         let (r, data) = c.call_msg::<ReadFileResponse>(method::READ_FILE, &req, &[])?;
         if r.count as usize != data.len() {
@@ -134,7 +134,7 @@ impl Client {
             data.len()
           )));
         }
-        Ok((data, c.max_payload))
+        Ok((data, c.max_payload()))
       })?
       .0;
     if data.len() < limit {
@@ -157,7 +157,7 @@ impl Client {
   pub fn write_file(&self, path: &str, data: &[u8], truncate: bool) -> Result<()> {
     let sent = self
       .run_any(|c| {
-        if data.len() > c.max_payload {
+        if data.len() > c.max_payload() {
           return Ok(false);
         }
         let req = WriteFileRequest {

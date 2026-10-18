@@ -9,12 +9,16 @@ pub enum Error {
   Protocol(String),
   /// The socket failed.
   Io(io::Error),
-  /// A call did not finish within `Options::call_timeout`. The connection was dropped, so a late
-  /// reply cannot reach another call. Its open files and watches are gone. The code is
+  /// A call did not finish within `Options::call_timeout`. On a pipelining connection only this
+  /// call fails and the late reply is dropped. Otherwise the connection was dropped, so a late
+  /// reply cannot reach another call, and its open files and watches are gone. The code is
   /// `DEADLINE_EXCEEDED` and the `io::ErrorKind` is `TimedOut`.
   Timeout(String),
   /// A request is larger than the frame limits. Nothing was sent and the connection is intact.
   TooLarge(String),
+  /// A directory helper hit its bound: `read_dir_all` found more entries than its limit, or
+  /// `walk` queued more pending directories than its limit. The message names the limit.
+  TooManyEntries(String),
   /// A write that covers more than one frame failed after `written` bytes were stored.
   /// `source` is the failure. `code` and the `io::ErrorKind` come from `source`.
   Partial { written: usize, source: Box<Error> },
@@ -45,6 +49,7 @@ impl Error {
       Error::Io(e) => Error::Io(io::Error::new(e.kind(), e.to_string())),
       Error::Timeout(m) => Error::Timeout(m.clone()),
       Error::TooLarge(m) => Error::TooLarge(m.clone()),
+      Error::TooManyEntries(m) => Error::TooManyEntries(m.clone()),
       Error::Partial { written, source } => Error::Partial {
         written: *written,
         source: Box::new(source.dup()),
@@ -69,6 +74,7 @@ impl fmt::Display for Error {
       Error::Io(e) => write!(f, "io error: {e}"),
       Error::Timeout(m) => write!(f, "DEADLINE_EXCEEDED: {m}"),
       Error::TooLarge(m) => write!(f, "request too large: {m}"),
+      Error::TooManyEntries(m) => write!(f, "too many entries: {m}"),
       Error::Partial { written, source } => write!(f, "partial write of {written} bytes: {source}"),
     }
   }
@@ -93,7 +99,7 @@ impl From<io::Error> for Error {
 impl From<Error> for io::Error {
   fn from(e: Error) -> io::Error {
     let kind = match &e {
-      Error::TooLarge(_) => io::ErrorKind::InvalidInput,
+      Error::TooLarge(_) | Error::TooManyEntries(_) => io::ErrorKind::InvalidInput,
       e => e.code().map_or(io::ErrorKind::Other, kind_for_code),
     };
     match e {

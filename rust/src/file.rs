@@ -1,5 +1,5 @@
 use crate::bulk::{batch_errors, item, MAX_BATCH_ITEMS};
-use crate::client::{Conn, Slot};
+use crate::client::{Slot, Sock};
 use crate::error::{Error, Result};
 use crate::frame::MAX_PAYLOAD_BYTES;
 use crate::wire::*;
@@ -17,8 +17,8 @@ pub(crate) struct State {
 }
 
 /// One ReadAt request of at most one payload from `base`. Returns the data and the length asked.
-fn read_chunk(c: &mut Conn, handle: u64, base: i64, len: usize) -> Result<(Vec<u8>, usize)> {
-  let want = len.min(c.max_payload);
+fn read_chunk(c: &Sock, handle: u64, base: i64, len: usize) -> Result<(Vec<u8>, usize)> {
+  let want = len.min(c.max_payload());
   let req = ReadAtRequest {
     handle,
     offset: base,
@@ -36,8 +36,8 @@ fn read_chunk(c: &mut Conn, handle: u64, base: i64, len: usize) -> Result<(Vec<u
 }
 
 /// One WriteAt request of at most one payload from the start of `rest`. Returns the bytes stored.
-fn write_chunk(c: &mut Conn, handle: u64, base: i64, rest: &[u8]) -> Result<usize> {
-  let chunk = &rest[..rest.len().min(c.max_payload)];
+fn write_chunk(c: &Sock, handle: u64, base: i64, rest: &[u8]) -> Result<usize> {
+  let chunk = &rest[..rest.len().min(c.max_payload())];
   let (r, _) = c.call_msg::<WriteAtResponse>(method::WRITE_AT, &WriteAtRequest { handle, offset: base }, chunk)?;
   let n = r.count as usize;
   if n == 0 || n > chunk.len() {
@@ -71,12 +71,12 @@ pub struct WriteItem {
 }
 
 /// Reads the leading ranges of `ranges` that fit in one ReadBatch request.
-fn read_group(c: &mut Conn, handle: u64, ranges: &[Range]) -> Result<Step<Vec<u8>>> {
-  if ranges[0].length as usize > c.max_payload {
+fn read_group(c: &Sock, handle: u64, ranges: &[Range]) -> Result<Step<Vec<u8>>> {
+  if ranges[0].length as usize > c.max_payload() {
     return Ok(Step::Big);
   }
   let (mut end, mut bytes) = (0, 0usize);
-  while end < ranges.len() && end < MAX_BATCH_ITEMS && bytes + ranges[end].length as usize <= c.max_payload {
+  while end < ranges.len() && end < MAX_BATCH_ITEMS && bytes + ranges[end].length as usize <= c.max_payload() {
     bytes += ranges[end].length as usize;
     end += 1;
   }
@@ -121,18 +121,18 @@ fn read_group(c: &mut Conn, handle: u64, ranges: &[Range]) -> Result<Step<Vec<u8
 
 /// Writes the leading items of `items` that fit in one WriteBatch request. An item whose offset
 /// cannot be sent fails alone without a request.
-fn write_group(c: &mut Conn, handle: u64, items: &[WriteItem]) -> Result<Step<usize>> {
+fn write_group(c: &Sock, handle: u64, items: &[WriteItem]) -> Result<Step<usize>> {
   if let Err(e) = to_i64(items[0].offset) {
     return Ok(Step::Group(vec![Err(e)], 1));
   }
-  if items[0].data.len() > c.max_payload {
+  if items[0].data.len() > c.max_payload() {
     return Ok(Step::Big);
   }
   let (mut end, mut bytes) = (0, 0usize);
   while end < items.len()
     && end < MAX_BATCH_ITEMS
     && items[end].offset <= i64::MAX as u64
-    && bytes + items[end].data.len() <= c.max_payload
+    && bytes + items[end].data.len() <= c.max_payload()
   {
     bytes += items[end].data.len();
     end += 1;

@@ -132,6 +132,21 @@ func WriteBuffers(w io.Writer, f Frame, lim Limits) error {
 // before reading the body. io.EOF is returned only when r ends cleanly at a
 // frame boundary.
 func Read(r io.Reader, lim Limits) (Frame, error) {
+	return ReadAlloc(r, lim, nil)
+}
+
+// ReadAlloc decodes one frame like Read, but takes the payload buffer from
+// alloc. alloc(n) returns a slice with capacity of at least n; ReadAlloc uses
+// its first n bytes and overwrites them in full, so the slice need not be
+// zeroed. A slice with less capacity is replaced by a fresh allocation. alloc is
+// asked only for sizes the received bytes justify: a payload up to readChunk
+// asks once for its size, a larger one asks for readChunk first and then for
+// each growth step after the earlier steps filled. A call after the first means
+// the earlier slice has been copied and the caller may reuse it once alloc is
+// called again. The final payload is the slice from the last call. A nil alloc
+// allocates with make, as Read does. The metadata section is never taken from
+// alloc.
+func ReadAlloc(r io.Reader, lim Limits, alloc func(n int) []byte) (Frame, error) {
 	var hdr [HeaderSize]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return Frame{}, err
@@ -156,10 +171,10 @@ func Read(r io.Reader, lim Limits) (Frame, error) {
 		RequestID: binary.BigEndian.Uint64(hdr[8:16]),
 	}
 	var err error
-	if f.Meta, err = readSection(r, metaLen); err != nil {
+	if f.Meta, err = readSection(r, metaLen, nil); err != nil {
 		return Frame{}, unexpectedEOF(err)
 	}
-	if f.Payload, err = readSection(r, payloadLen); err != nil {
+	if f.Payload, err = readSection(r, payloadLen, alloc); err != nil {
 		return Frame{}, unexpectedEOF(err)
 	}
 	return f, nil
@@ -175,16 +190,17 @@ const readChunk = 64 << 10
 const growFactor = 4
 
 // readSection reads exactly n bytes from r. It returns nil for n == 0.
-func readSection(r io.Reader, n uint32) ([]byte, error) {
+// A non-nil alloc supplies the buffers.
+func readSection(r io.Reader, n uint32, alloc func(n int) []byte) ([]byte, error) {
 	if n == 0 {
 		return nil, nil
 	}
 	if n <= readChunk {
-		b := make([]byte, n)
+		b := sized(alloc, int(n))[:n]
 		_, err := io.ReadFull(r, b)
 		return b, err
 	}
-	buf := make([]byte, readChunk)
+	buf := sized(alloc, readChunk)[:readChunk]
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return nil, err
 	}
@@ -204,6 +220,17 @@ func readSection(r io.Reader, n uint32) ([]byte, error) {
 		}
 	}
 	return buf, nil
+}
+
+// sized returns a slice with capacity of at least n from alloc, or from make
+// when alloc is nil or returns too little.
+func sized(alloc func(n int) []byte, n int) []byte {
+	if alloc != nil {
+		if b := alloc(n); cap(b) >= n {
+			return b[:n]
+		}
+	}
+	return make([]byte, n)
 }
 
 // unexpectedEOF turns a mid-frame EOF into io.ErrUnexpectedEOF, so callers can

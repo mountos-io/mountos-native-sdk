@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "minorVersion": 6,
+  "minorVersion": 7,
   "capabilities": [
     "bulk_io",
     "ls_stat",
     "remove_all",
     "watch",
-    "warm"
+    "warm",
+    "pipelining"
   ],
   "enums": {
     "FileType": {

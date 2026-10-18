@@ -3,7 +3,7 @@
 
 use crate::client::{Client, Slot};
 use crate::error::{Error, Result};
-use crate::events::{lock, Chan, Event, Hub};
+use crate::events::{Chan, Event, Hub};
 use crate::wire::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -40,12 +40,7 @@ impl Client {
       recursive,
       since_sequence: since,
     };
-    let ((r, _), slot, epoch) = self.run_any(|c| {
-      *lock(&c.shared.pending_watch) = Some(chan.clone());
-      let r = c.call_msg::<WatchResponse>(method::WATCH, &req, &[]);
-      *lock(&c.shared.pending_watch) = None;
-      r
-    })?;
+    let (r, slot, epoch) = self.run_any(|c| c.call_watch(&req, chan.clone()))?;
     Ok(Watch {
       id: r.watch_id,
       slot: slot.clone(),

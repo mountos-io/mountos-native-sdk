@@ -14,7 +14,7 @@
     "gen:stubs": "cd ../gen && go run . -spec ../api/filesystem.yaml -client ../api/client.yaml -snapshot ../api/contract-snapshot.json -ts-out ../ts/src",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/test/client.test.js dist/test/bulk_watch.test.js dist/test/notices.test.js dist/test/reconnect.test.js dist/test/socketpath.test.js dist/test/pool.test.js dist/test/hostile.test.js dist/test/frame_fuzz.test.js"
+    "test": "npm run build && node --test dist/test/client.test.js dist/test/bulk_watch.test.js dist/test/notices.test.js dist/test/reconnect.test.js dist/test/socketpath.test.js dist/test/pool.test.js dist/test/hostile.test.js dist/test/frame_fuzz.test.js dist/test/pipeline.test.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

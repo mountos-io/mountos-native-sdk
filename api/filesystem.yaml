@@ -30,7 +30,7 @@
 
 api: mountos.filesystem
 version: 1
-minorVersion: 6
+minorVersion: 7
 
 endpoint:
   # One socket per mount: <home>/.mountOS/sockets/mountos_api_<hash>.sock, where <hash> is the
@@ -49,6 +49,28 @@ capabilities:
   - remove_all
   - watch
   - warm
+  - pipelining
+
+# Pipelining. A client that sees the capability "pipelining" in the Hello reply
+# may keep up to min(its own limit, max_inflight) requests outstanding on one
+# connection. Without the capability, or with max_inflight 1, a client keeps one
+# request in flight.
+#   - Replies carry the request id and may arrive in any order, except as the
+#     rules below require.
+#   - Requests that name the same handle (Read, Write, Seek, ReadAt, WriteAt,
+#     Fsync, Flush, Ftruncate, Fstat, Close, Readdir, Closedir, ReadBatch,
+#     WriteBatch) run one at a time in arrival order. Close and Closedir are
+#     barriers for their handle. A handle can be used only after the reply to
+#     its Open.
+#   - Path operations (Stat, Mkdir, Rename, Ls, StatBatch, Watch, Warm, and so
+#     on) run concurrently with everything and have no order among themselves.
+#     A client that needs an order waits for the reply.
+#   - A notice that a request causes is sent after the reply to that request.
+#   - At the limit the server stops reading frames until a request ends.
+#   - A client that stops waiting for a request marks its id abandoned and
+#     discards the late reply. The connection stays usable.
+#   - A failing request does not affect others. A bad frame closes the
+#     connection.
 
 enums:
   OpenFlag:
@@ -99,7 +121,7 @@ messages:
     version: {id: 1, type: uint32, required: true}
     capabilities: {id: 2, type: repeated string}
     max_payload_bytes: {id: 3, type: uint32, required: true}
-    max_inflight: {id: 4, type: uint32, required: true}
+    max_inflight: {id: 4, type: uint32, required: true}    # Requests the server accepts at once on one connection. Meaningful with the pipelining capability. Default 32.
 
   FileInfo:
     name: {id: 1, type: string}

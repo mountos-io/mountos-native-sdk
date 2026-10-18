@@ -11,11 +11,11 @@ import (
 )
 
 // File is an open server handle. It is bound to one connection. Calls on a File
-// are serialized; Files on different connections run in parallel.
+// are serialized. Calls on different Files run in parallel, on one connection
+// when the server allows several requests in flight.
 type File struct {
 	cl     *Client
-	c      *conn
-	gen    uint64
+	sk     *sock
 	max    int // payload bytes per frame
 	handle uint64
 	path   string        // as opened, for parallel batches
@@ -34,12 +34,7 @@ func (f *File) do(method uint16, req, resp proto.Message, payload []byte) ([]byt
 	if f.cl.isClosed() {
 		return nil, ErrClientClosed
 	}
-	f.c.lock()
-	defer f.c.unlock()
-	if !f.c.alive() || f.c.gen != f.gen {
-		return nil, ErrConnLost
-	}
-	return f.c.call(method, req, resp, payload)
+	return f.sk.callWait(method, req, resp, payload)
 }
 
 func (f *File) chunk() int { return f.max }

@@ -1,6 +1,6 @@
 import { itemErrors, MAX_BATCH_ITEMS, planPieces, ReadRange, ReadResult, StatResult, WriteItem, WriteResult } from "./bulk.js";
 import { Conn } from "./conn.js";
-import { DeadlineExceededError, MountosError, ProtocolError, TransportError } from "./errors.js";
+import { DeadlineExceededError, MountosError, ProtocolError, TooManyEntriesError, TransportError } from "./errors.js";
 import { Frame, MAX_PAYLOAD_BYTES } from "./frame.js";
 import * as pb from "./gen/mountos_fs.js";
 import {
@@ -23,10 +23,32 @@ export interface ClientOptions {
   logger?: Logger;
   /**
    * Limit in ms for every request and for the wait for a free connection. Default 0 means none.
-   * A request that times out ends its connection, which is dialed again on a later call, and the
-   * call fails with DeadlineExceededError.
+   * The call fails with DeadlineExceededError. On a connection that pipelines, only that call
+   * fails and a late reply is discarded. Otherwise the connection ends and is dialed again on a
+   * later call.
    */
   callTimeout?: number;
+  /**
+   * Most requests in flight on one connection. Default 32. The server's max_inflight caps it.
+   * A server without the pipelining capability gets one request at a time.
+   */
+  maxInflight?: number;
+}
+
+/** Most entries Client.readDirAll holds unless the call passes `maxEntries`. */
+export const DEFAULT_MAX_DIR_ENTRIES = 1_000_000;
+
+/** Most directory levels Client.walk descends below its root unless the call passes `maxDepth`. */
+export const DEFAULT_MAX_WALK_DEPTH = 1024;
+
+/** Options for Client.readDirAll. */
+export interface ReadDirAllOptions {
+  maxEntries?: number;
+}
+
+/** Options for Client.walk. */
+export interface WalkOptions {
+  maxDepth?: number;
 }
 
 /** One entry found by Client.walk. path is the full path of the entry. */
@@ -40,6 +62,10 @@ export interface WaitWarmOptions {
 }
 
 const noop = (): void => {};
+
+/** Default for ClientOptions.maxInflight. */
+export const DEFAULT_MAX_INFLIGHT = 32;
+const MAX_INFLIGHT_CEILING = 1024;
 
 /** Finished warms kept so a waitWarm that starts late still sees the result. */
 const WARM_CACHE_LIMIT = 1024;
@@ -86,6 +112,7 @@ export class Client extends ClientOps {
     private clientName: string,
     private hello: HelloResponse,
     private callTimeout: number,
+    private maxInflight: number,
   ) {
     super();
     this.slots = conns.map((conn) => ({ conn }));
@@ -95,7 +122,7 @@ export class Client extends ClientOps {
   private adopt(c: Conn): void {
     c.onNotice = (f) => this.onNotice(c, f);
     c.onClosed = (err, byClient) => this.onConnClosed(c, err, byClient);
-    c.onIdle = () => this.drain();
+    c.onFree = () => this.drain();
   }
 
   static async connect(socketPath: string, opts: ClientOptions = {}): Promise<Client> {
@@ -104,11 +131,13 @@ export class Client extends ClientOps {
     const name = opts.clientName ?? "mountos-ts";
     const timeout = opts.callTimeout ?? 0;
     if (!Number.isFinite(timeout) || timeout < 0) throw new RangeError("callTimeout must be >= 0");
+    const inflight = Math.min(opts.maxInflight ?? DEFAULT_MAX_INFLIGHT, MAX_INFLIGHT_CEILING);
+    if (!Number.isInteger(inflight) || inflight < 1) throw new RangeError("maxInflight must be >= 1");
     const results = await Promise.allSettled(
       Array.from({ length: size }, async () => {
         const c = await Conn.connect(socketPath, timeout);
         try {
-          const hello = await handshake(c, name);
+          const hello = await handshake(c, name, inflight);
           return { c, hello };
         } catch (e) {
           c.close();
@@ -123,7 +152,7 @@ export class Client extends ClientOps {
       throw (bad as PromiseRejectedResult).reason;
     }
     const hello = ok[0].value.hello;
-    return new Client(ok.map((r) => r.value.c), opts.logger ?? console, socketPath, name, hello, timeout);
+    return new Client(ok.map((r) => r.value.c), opts.logger ?? console, socketPath, name, hello, timeout, inflight);
   }
 
   /** Result of the latest Hello handshake. */
@@ -172,7 +201,7 @@ export class Client extends ClientOps {
       const c = await Conn.connect(this.path, this.callTimeout);
       let hello: HelloResponse;
       try {
-        hello = await handshake(c, this.clientName);
+        hello = await handshake(c, this.clientName, this.maxInflight);
       } catch (e) {
         c.close();
         throw e;
@@ -197,26 +226,34 @@ export class Client extends ClientOps {
     return p;
   }
 
+  // The live connection with the fewest calls that still has room under its in-flight limit.
+  // Ties go to the connection nearest the rotating cursor.
+  private pickConn(): Conn | undefined {
+    const n = this.slots.length;
+    let best: Conn | undefined;
+    for (let i = 0; i < n; i++) {
+      const c = this.slots[(this.cursor + i) % n].conn;
+      if (c.alive && c.load < c.limit && (!best || c.load < best.load)) best = c;
+    }
+    return best;
+  }
+
   // Hands a connection to the caller with a reservation that the caller releases with unreserve.
-  // A free live connection is used first, so a call never queues behind a busy one while another
-  // is idle. When every live connection is busy the call waits for the first one that frees up.
+  // The least loaded connection with room is used first. When every live connection is full the
+  // call waits for the first one that frees up.
   // Dead slots are redialed on the call that finds them. When no connection is live the call
   // waits for the first redial to finish, and a failed dial surfaces as a transport error.
   private async acquire(): Promise<Conn> {
     if (this.closed) throw new TransportError("client closed");
     const n = this.slots.length;
-    let free: Conn | undefined;
     let live = 0;
     const dead: Slot[] = [];
     for (let i = 0; i < n; i++) {
       const sl = this.slots[(this.cursor + i) % n];
-      if (!sl.conn.alive) {
-        dead.push(sl);
-        continue;
-      }
-      live++;
-      if (!free && sl.conn.load === 0) free = sl.conn;
+      if (sl.conn.alive) live++;
+      else dead.push(sl);
     }
+    const free = this.pickConn();
     this.cursor = (this.cursor + 1) % n;
     const dials = dead.map((sl) => this.redial(sl));
     if (live > 0) {
@@ -250,15 +287,15 @@ export class Client extends ClientOps {
     });
   }
 
-  // Serves waiting calls in order with connections that have no load.
+  // Serves waiting calls in order with connections that have room.
   private drain(): void {
     while (this.connWaiters.length > 0) {
-      const sl = this.slots.find((x) => x.conn.alive && x.conn.load === 0);
-      if (!sl) return;
+      const c = this.pickConn();
+      if (!c) return;
       const w = this.connWaiters.shift()!;
       clearTimeout(w.timer);
-      sl.conn.reserve();
-      w.resolve(sl.conn);
+      c.reserve();
+      w.resolve(c);
     }
   }
 
@@ -274,13 +311,16 @@ export class Client extends ClientOps {
     });
   }
 
+  // fn must start its call before its first await. The reservation then turns into that call's load.
   private async lease<T>(fn: (c: Conn) => Promise<T>): Promise<T> {
     const c = await this.acquire();
+    let p: Promise<T>;
     try {
-      return await fn(c);
+      p = fn(c);
     } finally {
       c.unreserve();
     }
+    return p;
   }
 
   // Fails a call locally when the server reported capabilities and this method is not among them.
@@ -511,13 +551,18 @@ export class Client extends ClientOps {
     });
   }
 
-  /** Lists a whole directory with attributes, reading every page. */
-  async readDirAll(path: string): Promise<DirEntry[]> {
+  /**
+   * Lists a whole directory with attributes, reading every page. Throws TooManyEntriesError when
+   * the directory has more than `maxEntries` entries (default DEFAULT_MAX_DIR_ENTRIES).
+   */
+  async readDirAll(path: string, opts: ReadDirAllOptions = {}): Promise<DirEntry[]> {
+    const limit = opts.maxEntries ?? DEFAULT_MAX_DIR_ENTRIES;
     const all: DirEntry[] = [];
     let cursor = "";
     do {
       const page = await this.ls(path, 0, cursor);
-      all.push(...page.entries);
+      if (all.length + page.entries.length > limit) throw new TooManyEntriesError("TOO_MANY_ENTRIES", path, limit);
+      for (const e of page.entries) all.push(e);
       cursor = page.nextCursor;
     } while (cursor !== "");
     return all;
@@ -526,19 +571,42 @@ export class Client extends ClientOps {
   /**
    * Walks a directory tree depth first, parents before their children. Each entry carries its
    * attributes. Symlinks are reported and not followed. A failed listing throws, so nothing is
-   * skipped silently. Leaving the loop early stops the walk.
+   * skipped silently. Leaving the loop early stops the walk. The walk holds one page per level on
+   * the path to the current entry and throws TooManyEntriesError (code WALK_TOO_DEEP) when the
+   * tree is deeper than `maxDepth` levels below `path` (default DEFAULT_MAX_WALK_DEPTH).
    */
-  async *walk(path: string): AsyncGenerator<WalkEntry, void, undefined> {
-    let cursor = "";
-    do {
-      const page = await this.ls(path, 0, cursor);
-      for (const entry of page.entries) {
-        const full = path.endsWith("/") ? path + entry.name : `${path}/${entry.name}`;
+  async *walk(path: string, opts: WalkOptions = {}): AsyncGenerator<WalkEntry, void, undefined> {
+    const maxDepth = opts.maxDepth ?? DEFAULT_MAX_WALK_DEPTH;
+    interface Level {
+      dir: string;
+      page: DirEntry[];
+      i: number;
+      next: string;
+    }
+    const open = async (dir: string, cursor: string): Promise<Level> => {
+      const p = await this.ls(dir, 0, cursor);
+      return { dir, page: p.entries, i: 0, next: p.nextCursor };
+    };
+    const stack: Level[] = [await open(path, "")];
+    while (stack.length > 0) {
+      const lv = stack[stack.length - 1];
+      if (lv.i < lv.page.length) {
+        const entry = lv.page[lv.i++];
+        const full = lv.dir.endsWith("/") ? lv.dir + entry.name : `${lv.dir}/${entry.name}`;
         yield { path: full, entry };
-        if (entry.type === FileType.Directory) yield* this.walk(full);
+        if (entry.type === FileType.Directory) {
+          if (stack.length > maxDepth) throw new TooManyEntriesError("WALK_TOO_DEEP", full, maxDepth);
+          stack.push(await open(full, ""));
+        }
+      } else if (lv.next !== "") {
+        const p = await this.ls(lv.dir, 0, lv.next);
+        lv.page = p.entries;
+        lv.i = 0;
+        lv.next = p.nextCursor;
+      } else {
+        stack.pop();
       }
-      cursor = page.nextCursor;
-    } while (cursor !== "");
+    }
   }
 
   /** Opens a file. The handle stays bound to the connection that opened it. */
@@ -551,11 +619,14 @@ export class Client extends ClientOps {
   }
 }
 
-async function handshake(c: Conn, name: string): Promise<HelloResponse> {
-  const req = enc(pb.HelloRequest, { clientName: name, minVersion: 1, maxVersion: 1, capabilities: [] });
+// Says hello and sets the connection's in-flight limit from the reply. Without the pipelining
+// capability the limit stays 1.
+async function handshake(c: Conn, name: string, maxInflight: number): Promise<HelloResponse> {
+  const req = enc(pb.HelloRequest, { clientName: name, minVersion: 1, maxVersion: 1, capabilities: ["pipelining"] });
   const h = decHello((await c.call(Method.Hello, req)).meta);
   if (h.version !== 1) throw new ProtocolError(`server chose unsupported version ${h.version}`);
   if (h.maxPayloadBytes === 0) throw new ProtocolError("server max_payload_bytes is zero");
+  c.setLimit(h.capabilities.includes("pipelining") ? Math.min(maxInflight, Math.max(1, h.maxInflight)) : 1);
   return h;
 }
 
