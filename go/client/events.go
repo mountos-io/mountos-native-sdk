@@ -118,7 +118,7 @@ type hub struct {
 	stop chan struct{}
 	done chan struct{}
 
-	// Guarded by wmu: warmed, waiters, order, instance.
+	// Guarded by wmu: warmed, waiters, order, instance, instanceKnown.
 	waiters map[uint64][]chan error
 	warmed  map[uint64]warmResult
 
@@ -130,7 +130,7 @@ type hub struct {
 	q []Event
 
 	order    []uint64 // warm ids in cache, oldest first
-	instance uint64   // server instance of the last Hello. 0 until one reports an id.
+	instance uint64   // server instance of the last Hello. 0 when that server reports none.
 	dropped  int
 	nextLID  uint64
 	qmu      sync.Mutex
@@ -138,6 +138,9 @@ type hub struct {
 	wmu      sync.Mutex
 	inCall   atomic.Bool // a listener is running, possibly the caller of shutdown
 	stopped  bool
+	// instanceKnown is true once a Hello has been seen, so a first connect
+	// differs from a reconnect to a server that reports no id.
+	instanceKnown bool
 }
 
 func newHub(l Logger) *hub {
@@ -389,27 +392,28 @@ func (h *hub) warmSettled(id uint64, err error) {
 
 // instanceSeen records the server instance a Hello reported. Warm ids restart
 // per server instance, so a different instance drops the finished warm results
-// and fails every waiter with ErrServerRestarted. An id of 0 (an older server)
-// changes nothing.
+// and fails every waiter with ErrServerRestarted. This includes a change from or
+// to 0 (a server that reports no id). A reconnect between two servers that both
+// report 0 cannot be told apart and keeps the results.
 func (h *hub) instanceSeen(id uint64) {
-	if id == 0 {
-		return
-	}
 	h.wmu.Lock()
 	defer h.wmu.Unlock()
-	if h.instance == id {
+	known := h.instanceKnown
+	h.instanceKnown = true
+	if known && h.instance == id {
 		return
 	}
-	if h.instance != 0 {
-		h.warmed, h.order = map[uint64]warmResult{}, nil
-		for wid, chs := range h.waiters {
-			for _, ch := range chs {
-				ch <- ErrServerRestarted
-			}
-			delete(h.waiters, wid)
-		}
-	}
 	h.instance = id
+	if !known {
+		return
+	}
+	h.warmed, h.order = map[uint64]warmResult{}, nil
+	for wid, chs := range h.waiters {
+		for _, ch := range chs {
+			ch <- ErrServerRestarted
+		}
+		delete(h.waiters, wid)
+	}
 }
 
 // WaitWarm waits for the warm request id returned by WarmOpen or WarmRead.

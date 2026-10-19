@@ -769,3 +769,27 @@ fn wait_warm_keeps_result_when_server_reports_no_instance() {
   reconnect(&c);
   c.wait_warm(1, Duration::from_millis(50)).unwrap();
 }
+
+#[test]
+fn wait_warm_rejects_result_of_server_that_gained_an_instance() {
+  let srv = start();
+  let c = client(&srv, 1);
+  srv.push(0, &nframe(notice(NoticeKind::WarmDone, 1, 1)));
+  c.wait_warm(1, t(5)).unwrap();
+  let c2 = c.clone();
+  let h = std::thread::spawn(move || c2.wait_warm(2, t(5)));
+  std::thread::sleep(Duration::from_millis(50));
+  srv.shared.instance.store(22, SeqCst);
+  srv.drop_conn(0);
+  reconnect(&c);
+  match h.join().unwrap() {
+    Err(Error::Io(e)) => assert!(e.to_string().contains("server restarted"), "{e}"),
+    other => panic!("unexpected {other:?}"),
+  }
+  match c.wait_warm(1, Duration::from_millis(100)) {
+    Err(Error::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::TimedOut),
+    other => panic!("unexpected {other:?}"),
+  }
+  srv.push(1, &nframe(notice(NoticeKind::WarmDone, 1, 1)));
+  c.wait_warm(1, t(5)).unwrap();
+}

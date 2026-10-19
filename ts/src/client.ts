@@ -120,7 +120,7 @@ export class Client extends ClientOps {
   private warmWaiters = new Map<bigint, Set<WarmWaiter>>();
   /** Finished warms by id, oldest first. The value is the failure, or undefined for success. */
   private warmDone = new Map<bigint, Error | undefined>();
-  /** Server instance of the latest Hello. 0n until a server reports one. */
+  /** Server instance of the latest Hello. 0n when that server reports none. The first Hello sets it in the constructor. */
   private instanceId = 0n;
 
   private slots: Slot[];
@@ -401,12 +401,11 @@ export class Client extends ClientOps {
   }
 
   // Warm ids restart per server instance. A new instance id drops the finished warms and fails
-  // the waiters. An id of 0n (an older server) changes nothing.
+  // the waiters. This includes a change from or to 0n (a server that reports no id). A reconnect
+  // between two servers that both report 0n cannot be told apart and keeps the results.
   private noteInstance(id: bigint): void {
-    if (id === 0n || id === this.instanceId) return;
-    const old = this.instanceId;
+    if (id === this.instanceId) return;
     this.instanceId = id;
-    if (old === 0n) return;
     this.warmDone.clear();
     const sets = [...this.warmWaiters.values()];
     this.warmWaiters.clear();

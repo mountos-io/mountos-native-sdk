@@ -74,4 +74,26 @@ describe("warm results across server instances", () => {
     await restart(0n);
     await client.waitWarm(1);
   });
+
+  it("rejects a finished warm and a waiter when the server gains an instance id", async () => {
+    srv.instanceId = 0n;
+    client.close();
+    await until(() => srv.conns.size === 0);
+    client = await Client.connect(srv.sockPath, { poolSize: 2, logger: { warn: (): void => {} } });
+    let warmed = 0;
+    client.addListener((e) => { if (e.kind === "warmDone") warmed++; });
+    srv.notice(srv.sockets()[0], { kind: pb.NoticeKind.NOTICE_KIND_WARM_DONE, refId: 1n });
+    await until(() => warmed === 1);
+    await client.waitWarm(1);
+    const rejected = assert.rejects(client.waitWarm(2), ServerRestartedError);
+
+    await restart(22n);
+    await rejected;
+    await assert.rejects(
+      client.waitWarm(1, { signal: AbortSignal.timeout(100) }),
+      (e: unknown) => (e as Error).name === "TimeoutError",
+    );
+    srv.notice(srv.sockets()[0], { kind: pb.NoticeKind.NOTICE_KIND_WARM_DONE, refId: 1n });
+    await client.waitWarm(1);
+  });
 });

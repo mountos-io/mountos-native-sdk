@@ -267,8 +267,11 @@ struct Warms {
   done: HashMap<u64, std::result::Result<(), (String, String)>>,
   order: VecDeque<u64>,
   closed: bool,
-  /// Server instance of the latest Hello. 0 until a server reports one.
+  /// Server instance of the latest Hello. 0 when that server reports none.
   instance: u64,
+  /// True once a Hello has been seen, so a first connect differs from a reconnect to a server
+  /// that reports no id.
+  instance_known: bool,
   /// Counts server instance changes. A waiter that sees it move gives up.
   restarts: u64,
 }
@@ -401,19 +404,17 @@ impl Hub {
   }
 
   /// Records the server instance of a Hello. Warm ids restart per server instance, so a new
-  /// instance drops the finished warms and fails the waiters. An id of 0 (an older server)
-  /// changes nothing.
+  /// instance drops the finished warms and fails the waiters. This includes a change from or to
+  /// 0 (a server that reports no id). A reconnect between two servers that both report 0 cannot
+  /// be told apart and keeps the results.
   pub(crate) fn note_instance(&self, id: u64) {
-    if id == 0 {
-      return;
-    }
     let mut w = lock(&self.warms);
-    if w.instance == id {
+    let known = std::mem::replace(&mut w.instance_known, true);
+    if known && w.instance == id {
       return;
     }
-    let first = w.instance == 0;
     w.instance = id;
-    if first {
+    if !known {
       return;
     }
     w.done.clear();
