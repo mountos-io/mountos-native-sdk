@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,6 +20,9 @@ const (
 	// DefaultMaxWalkDepth is the most directory levels WalkDir descends below its root.
 	DefaultMaxWalkDepth = 1024
 )
+
+// maxEmptyPages is the most consecutive empty pages a listing may return before the helpers stop.
+const maxEmptyPages = 16
 
 // ErrTooManyEntries matches the error ReadDirAll returns when a directory has more entries than its limit.
 var ErrTooManyEntries = errors.New("mountos: too many directory entries")
@@ -53,6 +57,7 @@ func (e *WalkTooDeepError) Error() string {
 func (e *WalkTooDeepError) Is(target error) bool { return target == ErrWalkTooDeep }
 
 type dirOpts struct {
+	ctx        context.Context //nolint:containedctx // Per-call option, not stored beyond the call.
 	maxEntries int
 	maxDepth   int
 }
@@ -67,8 +72,12 @@ func WithMaxEntries(n int) DirOption { return func(o *dirOpts) { o.maxEntries = 
 // less keeps the default.
 func WithMaxDepth(n int) DirOption { return func(o *dirOpts) { o.maxDepth = n } }
 
+// WithContext stops ReadDirAll or WalkDir with ctx.Err() once ctx is done. The check runs before each
+// Ls request and each entry.
+func WithContext(ctx context.Context) DirOption { return func(o *dirOpts) { o.ctx = ctx } }
+
 func newDirOpts(opts []DirOption) dirOpts {
-	o := dirOpts{maxEntries: DefaultMaxDirEntries, maxDepth: DefaultMaxWalkDepth}
+	o := dirOpts{ctx: context.Background(), maxEntries: DefaultMaxDirEntries, maxDepth: DefaultMaxWalkDepth}
 	var set dirOpts
 	for _, f := range opts {
 		f(&set)
@@ -79,23 +88,60 @@ func newDirOpts(opts []DirOption) dirOpts {
 	if set.maxDepth > 0 {
 		o.maxDepth = set.maxDepth
 	}
+	if set.ctx != nil {
+		o.ctx = set.ctx
+	}
 	return o
 }
 
 type lsFunc func(path string, limit uint32, cursor string) ([]*DirEntryWithInfo, string, error)
 
+// pager follows the cursor chain of one directory listing.
+type pager struct {
+	ctx    context.Context //nolint:containedctx // Lives for one listing.
+	dir    string
+	cursor string
+	empty  int // consecutive empty pages
+}
+
+// page fetches the next page. It returns the entries and whether more pages follow. A cursor that
+// repeats, or too many empty pages in a row, ends the listing with a *ProtocolError.
+func (g *pager) page(ls lsFunc) ([]*DirEntryWithInfo, bool, error) {
+	if err := g.ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	entries, next, err := ls(g.dir, walkPage, g.cursor)
+	if err != nil {
+		return nil, false, err
+	}
+	if next == "" {
+		return entries, false, nil
+	}
+	if next == g.cursor {
+		return nil, false, &ProtocolError{Op: "ls", Err: fmt.Errorf("cursor %q of %s did not advance", next, g.dir)}
+	}
+	if len(entries) > 0 {
+		g.empty = 0
+	} else if g.empty++; g.empty > maxEmptyPages {
+		return nil, false, &ProtocolError{Op: "ls", Err: fmt.Errorf("%d empty pages in a row in %s", g.empty, g.dir)}
+	}
+	g.cursor = next
+	return entries, true, nil
+}
+
 // ReadDirAll lists every entry of path with attributes, in server order. It
 // returns a *TooManyEntriesError (matching ErrTooManyEntries) when the
 // directory has more entries than the limit, before it holds them.
 func (cl *Client) ReadDirAll(path string, opts ...DirOption) ([]*DirEntryWithInfo, error) {
-	return readDirAll(cl.Ls, path, newDirOpts(opts).maxEntries)
+	o := newDirOpts(opts)
+	return readDirAll(o.ctx, cl.Ls, path, o.maxEntries)
 }
 
-func readDirAll(ls lsFunc, path string, limit int) ([]*DirEntryWithInfo, error) {
+func readDirAll(ctx context.Context, ls lsFunc, path string, limit int) ([]*DirEntryWithInfo, error) {
 	var all []*DirEntryWithInfo
-	cursor := ""
+	g := &pager{ctx: ctx, dir: path}
 	for {
-		entries, next, err := ls(path, walkPage, cursor)
+		entries, more, err := g.page(ls)
 		if err != nil {
 			return nil, err
 		}
@@ -103,10 +149,9 @@ func readDirAll(ls lsFunc, path string, limit int) ([]*DirEntryWithInfo, error) 
 			return nil, &TooManyEntriesError{Path: path, Limit: limit}
 		}
 		all = append(all, entries...)
-		if next == "" {
+		if !more {
 			return all, nil
 		}
-		cursor = next
 	}
 }
 
@@ -122,17 +167,21 @@ func readDirAll(ls lsFunc, path string, limit int) ([]*DirEntryWithInfo, error) 
 // silently. A tree deeper than the limit stops the walk with a
 // *WalkTooDeepError (matching ErrWalkTooDeep).
 func (cl *Client) WalkDir(root string, fn func(p string, e *DirEntryWithInfo) error, opts ...DirOption) error {
-	return walkDir(cl.Ls, root, 0, newDirOpts(opts).maxDepth, fn)
+	o := newDirOpts(opts)
+	return walkDir(o.ctx, cl.Ls, root, 0, o.maxDepth, fn)
 }
 
-func walkDir(ls lsFunc, dir string, depth, maxDepth int, fn func(string, *DirEntryWithInfo) error) error {
-	cursor := ""
+func walkDir(ctx context.Context, ls lsFunc, dir string, depth, maxDepth int, fn func(string, *DirEntryWithInfo) error) error {
+	g := &pager{ctx: ctx, dir: dir}
 	for {
-		entries, next, err := ls(dir, walkPage, cursor)
+		entries, more, err := g.page(ls)
 		if err != nil {
 			return err
 		}
 		for _, e := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			p := path.Join(dir, e.GetName())
 			isDir := e.GetType() == wire.FileType_FILE_TYPE_DIRECTORY
 			switch err := fn(p, e); {
@@ -143,14 +192,13 @@ func walkDir(ls lsFunc, dir string, depth, maxDepth int, fn func(string, *DirEnt
 				if depth+1 > maxDepth {
 					return &WalkTooDeepError{Path: p, Limit: maxDepth}
 				}
-				if err := walkDir(ls, p, depth+1, maxDepth, fn); err != nil {
+				if err := walkDir(ctx, ls, p, depth+1, maxDepth, fn); err != nil {
 					return err
 				}
 			}
 		}
-		if next == "" {
+		if !more {
 			return nil
 		}
-		cursor = next
 	}
 }

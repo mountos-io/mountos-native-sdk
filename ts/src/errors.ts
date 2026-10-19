@@ -61,3 +61,14 @@ export class TooManyEntriesError extends Error {
     this.name = "TooManyEntriesError";
   }
 }
+
+/**
+ * A waitWarm call was pending when a reconnect showed a new server instance. Warm ids restart
+ * with each server instance, so the result of the old request is lost.
+ */
+export class ServerRestartedError extends Error {
+  constructor() {
+    super("server restarted, warm result lost");
+    this.name = "ServerRestartedError";
+  }
+}

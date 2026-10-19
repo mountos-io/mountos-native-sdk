@@ -29,6 +29,8 @@ export class FakeServer {
   capabilities: string[] = [];
   readDelayMs = 0;
   helloCount = 0;
+  /** instance_id the Hello reply reports. 0n reports none, like an older server. */
+  instanceId = 0n;
   readFileCalls = 0;
   writeFileCalls = 0;
   unwatchCount = 0;
@@ -190,6 +192,7 @@ export class FakeServer {
         this.helloCount++;
         return this.ok(s, r, pb.HelloResponse, {
           version: 1, capabilities: this.capabilities, maxPayloadBytes: this.maxPayload, maxInflight: 1,
+          instanceId: this.instanceId,
         });
       case 2:
         return this.reply(s, r, empty);

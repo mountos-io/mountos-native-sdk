@@ -1,6 +1,6 @@
 import { itemErrors, MAX_BATCH_ITEMS, planPieces, type ReadRange, type ReadResult, type StatResult, type WriteItem, type WriteResult } from "./bulk.js";
 import { Conn } from "./conn.js";
-import { DeadlineExceededError, MountosError, ProtocolError, TooManyEntriesError, TransportError } from "./errors.js";
+import { DeadlineExceededError, MountosError, ProtocolError, ServerRestartedError, TooManyEntriesError, TransportError } from "./errors.js";
 import { type Frame, MAX_PAYLOAD_BYTES } from "./frame.js";
 import * as pb from "./gen/mountos_fs.js";
 import {
@@ -44,11 +44,30 @@ export const DEFAULT_MAX_WALK_DEPTH = 1024;
 /** Options for Client.readDirAll. */
 export interface ReadDirAllOptions {
   maxEntries?: number;
+  /** Stops the listing before the next page request. The call rejects with the signal's reason. */
+  signal?: AbortSignal;
 }
 
 /** Options for Client.walk. */
 export interface WalkOptions {
   maxDepth?: number;
+  /** Stops the walk before the next page request. The walk throws the signal's reason. */
+  signal?: AbortSignal;
+}
+
+/** Most consecutive empty pages with a next cursor that a directory helper accepts. */
+export const MAX_EMPTY_DIR_PAGES = 64;
+
+/**
+ * Returns the count of consecutive empty pages after this page. Throws ProtocolError when the
+ * server repeats the cursor it was given or keeps sending empty pages.
+ */
+function nextEmptyRun(dir: string, cursor: string, nextCursor: string, entries: number, run: number): number {
+  if (nextCursor === "") return 0;
+  if (nextCursor === cursor) throw new ProtocolError(`Ls cursor did not advance for ${dir}`);
+  if (entries > 0) return 0;
+  if (run + 1 > MAX_EMPTY_DIR_PAGES) throw new ProtocolError(`Ls returned over ${MAX_EMPTY_DIR_PAGES} empty pages for ${dir}`);
+  return run + 1;
 }
 
 /** One entry found by Client.walk. path is the full path of the entry. */
@@ -101,6 +120,8 @@ export class Client extends ClientOps {
   private warmWaiters = new Map<bigint, Set<WarmWaiter>>();
   /** Finished warms by id, oldest first. The value is the failure, or undefined for success. */
   private warmDone = new Map<bigint, Error | undefined>();
+  /** Server instance of the latest Hello. 0n until a server reports one. */
+  private instanceId = 0n;
 
   private slots: Slot[];
   private connWaiters: ConnWaiter[] = [];
@@ -115,6 +136,7 @@ export class Client extends ClientOps {
     private maxInflight: number,
   ) {
     super();
+    this.instanceId = hello.instanceId;
     this.slots = conns.map((conn) => ({ conn }));
     for (const c of conns) this.adopt(c);
   }
@@ -213,6 +235,7 @@ export class Client extends ClientOps {
       this.adopt(c);
       sl.conn = c;
       this.hello = hello;
+      this.noteInstance(hello.instanceId);
       return c;
     })();
     sl.dialing = p;
@@ -377,6 +400,19 @@ export class Client extends ClientOps {
     if (!taken) this.logger.warn(`mountos: event with no listener ${describeEvent(e)}`);
   }
 
+  // Warm ids restart per server instance. A new instance id drops the finished warms and fails
+  // the waiters. An id of 0n (an older server) changes nothing.
+  private noteInstance(id: bigint): void {
+    if (id === 0n || id === this.instanceId) return;
+    const old = this.instanceId;
+    this.instanceId = id;
+    if (old === 0n) return;
+    this.warmDone.clear();
+    const sets = [...this.warmWaiters.values()];
+    this.warmWaiters.clear();
+    for (const set of sets) for (const w of set) w.reject(new ServerRestartedError());
+  }
+
   // Records a finished warm and wakes its waiters. Returns true when a waiter took it.
   private finishWarm(e: ClientEvent): boolean {
     const result = e.kind === "warmFailed" ? e.error : undefined;
@@ -419,7 +455,8 @@ export class Client extends ClientOps {
 
   /**
    * Reads a whole file. One request serves files smaller than the payload limit. A file that
-   * fills the limit may be longer, so the rest is read from an opened file in payload-sized reads.
+   * fills the limit may be longer, so the whole file is read again from zero on one opened file
+   * in payload-sized reads. The first reply is dropped, so the result never mixes two inodes.
    */
   async readFile(path: string): Promise<Buffer> {
     this.need(Method.ReadFile);
@@ -429,8 +466,8 @@ export class Client extends ClientOps {
       throw new ProtocolError(`ReadFile count ${count} does not match payload ${r.payload.length}`);
     }
     if (r.payload.length < this.maxPayload) return r.payload;
-    const parts = [r.payload];
-    let off = r.payload.length;
+    const parts: Buffer[] = [];
+    let off = 0;
     const f = await this.open(path);
     try {
       for (;;) {
@@ -461,9 +498,12 @@ export class Client extends ClientOps {
       const f = await this.open(path, OpenFlag.WriteOnly | OpenFlag.Create | (truncate ? OpenFlag.Trunc : 0));
       try {
         written = await f.write(0, buf);
-      } finally {
+      } catch (e) {
         await f.close().catch(noop);
+        throw e;
       }
+      // Close flushes, so a close error means the data may not be durable.
+      await f.close();
     }
     if (written !== buf.length) throw new MountosError("EIO", `short write ${written} of ${buf.length} bytes`);
   }
@@ -471,7 +511,8 @@ export class Client extends ClientOps {
   /**
    * Waits for a warm request to finish. Resolves on warmDone and rejects with the MountosError
    * on warmFailed. A result that arrived before the call is found in a cache of the last 1024
-   * warms. Rejects with the signal's reason on abort. It does not poll the server.
+   * warms. Rejects with the signal's reason on abort. It does not poll the server. A reconnect to a
+   * new server instance drops the cache and rejects pending calls with ServerRestartedError.
    */
   waitWarm(id: number | bigint, opts: WaitWarmOptions = {}): Promise<void> {
     const wid = BigInt(id);
@@ -562,10 +603,13 @@ export class Client extends ClientOps {
     const limit = opts.maxEntries ?? DEFAULT_MAX_DIR_ENTRIES;
     const all: DirEntry[] = [];
     let cursor = "";
+    let run = 0;
     do {
+      opts.signal?.throwIfAborted();
       const page = await this.ls(path, 0, cursor);
       if (all.length + page.entries.length > limit) throw new TooManyEntriesError("TOO_MANY_ENTRIES", path, limit);
       for (const e of page.entries) all.push(e);
+      run = nextEmptyRun(path, cursor, page.nextCursor, page.entries.length, run);
       cursor = page.nextCursor;
     } while (cursor !== "");
     return all;
@@ -585,10 +629,12 @@ export class Client extends ClientOps {
       page: DirEntry[];
       i: number;
       next: string;
+      run: number;
     }
     const open = async (dir: string, cursor: string): Promise<Level> => {
+      opts.signal?.throwIfAborted();
       const p = await this.ls(dir, 0, cursor);
-      return { dir, page: p.entries, i: 0, next: p.nextCursor };
+      return { dir, page: p.entries, i: 0, next: p.nextCursor, run: nextEmptyRun(dir, cursor, p.nextCursor, p.entries.length, 0) };
     };
     const stack: Level[] = [await open(path, "")];
     while (stack.length > 0) {
@@ -602,7 +648,9 @@ export class Client extends ClientOps {
           stack.push(await open(full, ""));
         }
       } else if (lv.next !== "") {
+        opts.signal?.throwIfAborted();
         const p = await this.ls(lv.dir, 0, lv.next);
+        lv.run = nextEmptyRun(lv.dir, lv.next, p.nextCursor, p.entries.length, lv.run);
         lv.page = p.entries;
         lv.i = 0;
         lv.next = p.nextCursor;
@@ -729,14 +777,18 @@ export class FileHandle extends FileOps {
   /**
    * Writes many items in one round trip. The result has one entry per item in request order.
    * An item that is cut short reports the bytes written before the cut. Items larger than the
-   * payload limit and inputs over the request limits run as several requests.
+   * payload limit and inputs over the request limits run as several requests. After a piece of
+   * an item fails or is cut short, the later requests do not send the rest of that item.
    */
   writeBatch(items: WriteItem[]): Promise<WriteResult[]> {
     return this.op(async () => {
       this.need(Method.WriteBatch);
       const groups = planPieces(items.map((it) => ({ offset: it.offset, length: it.data.byteLength })), this.chunk);
       const st = items.map(() => ({ written: 0, short: false, error: undefined as MountosError | undefined }));
-      for (const group of groups) {
+      for (const planned of groups) {
+        // A failed or short item keeps its later pieces unsent, so bytes past its reported prefix stay untouched.
+        const group = planned.filter((p) => !st[p.item].short && !st[p.item].error);
+        if (group.length === 0) continue;
         const data = group.map((p) => {
           const d = items[p.item].data;
           return Buffer.from(d.buffer, d.byteOffset + p.src, p.length);

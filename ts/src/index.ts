@@ -1,10 +1,11 @@
-export { Client, DEFAULT_MAX_DIR_ENTRIES, DEFAULT_MAX_WALK_DEPTH, Dir, FileHandle } from "./client.js";
+export { Client, DEFAULT_MAX_DIR_ENTRIES, DEFAULT_MAX_WALK_DEPTH, Dir, FileHandle, MAX_EMPTY_DIR_PAGES } from "./client.js";
 export type { ClientOptions, ReadDirAllOptions, WaitWarmOptions, WalkEntry, WalkOptions } from "./client.js";
 export {
   DeadlineExceededError,
   MountosError,
   POSIX_ERRNOS,
   ProtocolError,
+  ServerRestartedError,
   TooManyEntriesError,
   TransportError,
 } from "./errors.js";

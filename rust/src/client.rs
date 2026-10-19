@@ -190,6 +190,8 @@ struct Info {
   /// Capabilities the server reported. `None` when it reported none (an older server), which
   /// allows every call.
   caps: Option<HashSet<String>>,
+  /// Server instance id. 0 from an older server.
+  instance: u64,
 }
 
 /// One handshaken connection. Calls from many threads overlap up to the limit. Request frames are
@@ -270,11 +272,13 @@ impl Sock {
     } else {
       1
     };
+    let instance = resp.instance_id;
     let caps = (!resp.capabilities.is_empty()).then(|| resp.capabilities.into_iter().collect());
     let _ = self.info.set(Info {
       max_payload,
       limit,
       caps,
+      instance,
     });
     Ok(())
   }
@@ -285,6 +289,10 @@ impl Sock {
 
   fn limit(&self) -> usize {
     self.info.get().map_or(1, |i| i.limit)
+  }
+
+  fn instance(&self) -> u64 {
+    self.info.get().map_or(0, |i| i.instance)
   }
 
   fn is_dead(&self) -> bool {
@@ -751,6 +759,7 @@ impl Slot {
         return Err(e);
       }
       self.limit.store(s.limit(), Ordering::SeqCst);
+      self.hub.note_instance(s.instance());
       st.sock = Some(s);
       st.epoch += 1;
       self.gate.bump();

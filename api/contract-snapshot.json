@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "minorVersion": 7,
+  "minorVersion": 8,
   "capabilities": [
     "bulk_io",
     "ls_stat",
@@ -149,6 +149,10 @@
       "capabilities": {
         "id": 2,
         "type": "repeated string"
+      },
+      "instance_id": {
+        "id": 5,
+        "type": "uint64"
       },
       "max_inflight": {
         "id": 4,

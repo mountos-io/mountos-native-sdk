@@ -41,6 +41,8 @@ export interface HelloResponse {
   capabilities: string[];
   maxPayloadBytes: number;
   maxInflight: number;
+  /** Random per server start. 0n from an older server. */
+  instanceId: bigint;
 }
 
 interface Codec<T> {
@@ -73,6 +75,7 @@ export function decHello(meta: Buffer): HelloResponse {
     capabilities: r.capabilities,
     maxPayloadBytes: r.maxPayloadBytes,
     maxInflight: r.maxInflight,
+    instanceId: r.instanceId,
   };
 }
 

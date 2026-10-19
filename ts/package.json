@@ -38,7 +38,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/test/client.test.js dist/test/bulk_watch.test.js dist/test/notices.test.js dist/test/reconnect.test.js dist/test/socketpath.test.js dist/test/pool.test.js dist/test/hostile.test.js dist/test/frame_fuzz.test.js dist/test/pipeline.test.js"
+    "test": "npm run build && node --test dist/test/client.test.js dist/test/bulk_watch.test.js dist/test/notices.test.js dist/test/reconnect.test.js dist/test/socketpath.test.js dist/test/pool.test.js dist/test/hostile.test.js dist/test/frame_fuzz.test.js dist/test/pipeline.test.js dist/test/warm_instance.test.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

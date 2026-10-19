@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -38,7 +39,7 @@ func (l *pagedLister) ls(path string, limit uint32, cursor string) ([]*DirEntryW
 
 func TestReadDirAllLimitStopsGrowth(t *testing.T) {
 	l := &pagedLister{total: -1}
-	_, err := readDirAll(l.ls, "/huge", 3000)
+	_, err := readDirAll(context.Background(), l.ls, "/huge", 3000)
 	var te *TooManyEntriesError
 	if !errors.Is(err, ErrTooManyEntries) || !errors.As(err, &te) || te.Limit != 3000 {
 		t.Fatalf("err = %v", err)
@@ -50,12 +51,12 @@ func TestReadDirAllLimitStopsGrowth(t *testing.T) {
 
 func TestReadDirAllAtLimit(t *testing.T) {
 	l := &pagedLister{total: 2500}
-	all, err := readDirAll(l.ls, "/d", 2500)
+	all, err := readDirAll(context.Background(), l.ls, "/d", 2500)
 	if err != nil || len(all) != 2500 {
 		t.Fatalf("%d entries, %v", len(all), err)
 	}
 	l = &pagedLister{total: 2501}
-	if _, err := readDirAll(l.ls, "/d", 2500); !errors.Is(err, ErrTooManyEntries) {
+	if _, err := readDirAll(context.Background(), l.ls, "/d", 2500); !errors.Is(err, ErrTooManyEntries) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -86,7 +87,7 @@ func deepLister(path string, limit uint32, cursor string) ([]*DirEntryWithInfo, 
 
 func TestWalkDirDepthLimit(t *testing.T) {
 	seen := 0
-	err := walkDir(deepLister, "/", 0, 5, func(string, *DirEntryWithInfo) error { seen++; return nil })
+	err := walkDir(context.Background(), deepLister, "/", 0, 5, func(string, *DirEntryWithInfo) error { seen++; return nil })
 	var de *WalkTooDeepError
 	if !errors.Is(err, ErrWalkTooDeep) || !errors.As(err, &de) || de.Limit != 5 {
 		t.Fatalf("err = %v", err)
@@ -106,7 +107,7 @@ func TestWalkDirHoldsOnePagePerLevel(t *testing.T) {
 		biggest = max(biggest, len(e))
 		return e, n, err
 	}
-	if err := walkDir(ls, "/f", 0, 4, func(string, *DirEntryWithInfo) error { count++; return nil }); err != nil {
+	if err := walkDir(context.Background(), ls, "/f", 0, 4, func(string, *DirEntryWithInfo) error { count++; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if count != walkPage*5+3 || biggest != walkPage || l.calls != 6 {
@@ -129,5 +130,55 @@ func TestWalkDirOptionDepth(t *testing.T) {
 	}
 	if err := cl.WalkDir("/d", nop); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReadDirAllRejectsRepeatedCursor(t *testing.T) {
+	calls := 0
+	ls := func(string, uint32, string) ([]*DirEntryWithInfo, string, error) {
+		calls++
+		return nil, "same", nil
+	}
+	var pe *ProtocolError
+	if _, err := readDirAll(context.Background(), ls, "/d", 10); !errors.As(err, &pe) {
+		t.Fatalf("err = %v", err)
+	}
+	if calls > 3 {
+		t.Fatalf("%d Ls calls for a repeated cursor", calls)
+	}
+}
+
+func TestWalkDirBoundsEmptyPages(t *testing.T) {
+	calls := 0
+	ls := func(_ string, _ uint32, cursor string) ([]*DirEntryWithInfo, string, error) {
+		calls++
+		return nil, cursor + "x", nil
+	}
+	var pe *ProtocolError
+	err := walkDir(context.Background(), ls, "/d", 0, 4, func(string, *DirEntryWithInfo) error { return nil })
+	if !errors.As(err, &pe) || calls != maxEmptyPages+1 {
+		t.Fatalf("err = %v after %d calls", err, calls)
+	}
+}
+
+func TestDirHelpersHonourContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	l := &pagedLister{total: -1}
+	ls := func(p string, m uint32, c string) ([]*DirEntryWithInfo, string, error) {
+		if l.calls == 2 {
+			cancel()
+		}
+		return l.ls(p, m, c)
+	}
+	if _, err := readDirAll(ctx, ls, "/huge", 1<<30); !errors.Is(err, context.Canceled) {
+		t.Fatalf("readDirAll err = %v", err)
+	}
+	cancel()
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	l = &pagedLister{total: -1}
+	err := walkDir(ctx, ls, "/huge", 0, 4, func(string, *DirEntryWithInfo) error { return nil })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("walkDir err = %v", err)
 	}
 }

@@ -471,3 +471,53 @@ func TestWalkDirReportsListError(t *testing.T) {
 		t.Fatalf("walk of a missing root = %v", err)
 	}
 }
+
+// An append handle ignores offsets, so the batch runs on that handle alone and in item order.
+func TestWriteBatchAppendStaysSerial(t *testing.T) {
+	s := newFakeServer(t, 1000)
+	s.batchDelay = 30 * time.Millisecond
+	cl := dial(t, s, 3)
+	f, err := cl.Open("/ap", wire.OpenFlag_OPEN_FLAG_READ_WRITE|wire.OpenFlag_OPEN_FLAG_APPEND|wire.OpenFlag_OPEN_FLAG_CREATE, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	items := []WriteItem{{Offset: 0, Data: pattern(2500, 1)}, {Offset: 2500, Data: pattern(2500, 50)}, {Offset: 5000, Data: pattern(1800, 90)}}
+	if _, err := f.WriteBatch(items); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	opens := len(s.openFlags)
+	s.mu.Unlock()
+	if p := s.peak.Load(); p != 1 || opens != 1 {
+		t.Fatalf("peak requests in flight = %d, opens = %d, want 1 and 1", p, opens)
+	}
+}
+
+// Every handle that fanout opens keeps the append flag of the File.
+func TestFanoutKeepsAppendFlag(t *testing.T) {
+	old := fanoutMinBytes
+	fanoutMinBytes = 0
+	t.Cleanup(func() { fanoutMinBytes = old })
+	s := newFakeServer(t, 1000)
+	s.files["/af"] = pattern(6000, 3)
+	cl := dial(t, s, 3)
+	f, err := cl.Open("/af", wire.OpenFlag_OPEN_FLAG_READ_WRITE|wire.OpenFlag_OPEN_FLAG_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	if _, err := f.ReadBatch([]Range{{Offset: 0, Length: 2500}, {Offset: 2500, Length: 2500}, {Offset: 5000, Length: 1000}}); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.openFlags) < 2 {
+		t.Fatalf("%d opens, fanout did not run", len(s.openFlags))
+	}
+	for i, fl := range s.openFlags {
+		if fl&uint32(wire.OpenFlag_OPEN_FLAG_APPEND) == 0 {
+			t.Fatalf("open %d dropped the append flag: %#x", i, fl)
+		}
+	}
+}

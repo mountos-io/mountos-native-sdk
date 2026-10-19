@@ -61,7 +61,7 @@ class PipeServer {
       for (const f of rd.push(c)) {
         if (f.method === 1) {
           s.write(frame(1, f.requestId, pb.HelloResponse.encode({
-            version: 1, capabilities: this.caps, maxPayloadBytes: 1 << 20, maxInflight: this.maxInflight,
+            version: 1, capabilities: this.caps, maxPayloadBytes: 1 << 20, maxInflight: this.maxInflight, instanceId: 0n,
           }).finish()));
           continue;
         }

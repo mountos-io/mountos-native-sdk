@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -94,11 +95,12 @@ func (s *sock) lostErr() error {
 // broken conn is redialed by the next caller. Files opened on the old socket
 // fail cleanly because that socket is dead.
 type conn struct {
-	cl   *Client
-	sk   *sock // nil when not dialed. Changed under mu.
-	cur  atomic.Pointer[sock]
-	path string
-	mu   sync.Mutex
+	cl        *Client
+	sk        *sock  // nil when not dialed. Changed under mu.
+	afterDial func() // test hook, runs after a dial and before the socket is published
+	cur       atomic.Pointer[sock]
+	path      string
+	mu        sync.Mutex
 }
 
 // session returns the live socket, dialing first when there is none.
@@ -132,14 +134,26 @@ func (c *conn) ensure() (*sock, error) {
 		return sk, nil
 	}
 	c.drop()
-	nc, err := net.DialTimeout("unix", c.path, dialTimeout)
+	nc, err := c.dial()
 	if err != nil {
+		if c.cl.isClosed() {
+			return nil, ErrClientClosed
+		}
 		return nil, &DialError{Path: c.path, Err: err}
+	}
+	if c.afterDial != nil {
+		c.afterDial()
 	}
 	sk := &sock{c: c, nc: nc, dead: make(chan struct{}), pend: map[uint64]*waiter{}, abandoned: map[uint64]uint16{}}
 	c.sk = sk
 	c.cur.Store(sk)
 	go c.readLoop(sk)
+	// Close sets closed before it takes its shutdown snapshot. A socket published after that
+	// snapshot is seen here and dropped, so Hello never waits on a socket nobody will close.
+	if c.cl.isClosed() {
+		c.drop()
+		return nil, ErrClientClosed
+	}
 	var resp wire.HelloResponse
 	err = sk.roundTrip(mHello, &wire.HelloRequest{
 		ClientName: "mountos-native-sdk-go", MinVersion: protoVersion, MaxVersion: protoVersion,
@@ -150,9 +164,13 @@ func (c *conn) ensure() (*sock, error) {
 	}
 	if err != nil {
 		c.drop()
+		if c.cl.isClosed() {
+			return nil, ErrClientClosed
+		}
 		return nil, &DialError{Path: c.path, Err: err}
 	}
 	c.cl.setCaps(resp.GetCapabilities())
+	c.cl.hub.instanceSeen(resp.GetInstanceId())
 	sk.maxData = maxPayloadBytes
 	if m := int(resp.GetMaxPayloadBytes()); m > 0 && m < sk.maxData {
 		sk.maxData = m
@@ -164,6 +182,21 @@ func (c *conn) ensure() (*sock, error) {
 	sk.slots = make(chan struct{}, sk.limit)
 	sk.ready.Store(true)
 	return sk, nil
+}
+
+// dial opens the unix socket. Close cancels a dial in progress.
+func (c *conn) dial() (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	go func() {
+		select {
+		case <-c.cl.closedCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	var d net.Dialer
+	return d.DialContext(ctx, "unix", c.path)
 }
 
 // drop closes the socket on purpose and waits for its reader to exit. Caller holds mu.

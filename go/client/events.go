@@ -118,7 +118,7 @@ type hub struct {
 	stop chan struct{}
 	done chan struct{}
 
-	// Guarded by wmu: warmed, waiters, order.
+	// Guarded by wmu: warmed, waiters, order, instance.
 	waiters map[uint64][]chan error
 	warmed  map[uint64]warmResult
 
@@ -129,14 +129,15 @@ type hub struct {
 	// Guarded by qmu: q, dropped, stopped.
 	q []Event
 
-	order   []uint64 // warm ids in cache, oldest first
-	dropped int
-	nextLID uint64
-	qmu     sync.Mutex
-	lmu     sync.Mutex
-	wmu     sync.Mutex
-	inCall  atomic.Bool // a listener is running, possibly the caller of shutdown
-	stopped bool
+	order    []uint64 // warm ids in cache, oldest first
+	instance uint64   // server instance of the last Hello. 0 until one reports an id.
+	dropped  int
+	nextLID  uint64
+	qmu      sync.Mutex
+	lmu      sync.Mutex
+	wmu      sync.Mutex
+	inCall   atomic.Bool // a listener is running, possibly the caller of shutdown
+	stopped  bool
 }
 
 func newHub(l Logger) *hub {
@@ -386,11 +387,38 @@ func (h *hub) warmSettled(id uint64, err error) {
 	delete(h.waiters, id)
 }
 
+// instanceSeen records the server instance a Hello reported. Warm ids restart
+// per server instance, so a different instance drops the finished warm results
+// and fails every waiter with ErrServerRestarted. An id of 0 (an older server)
+// changes nothing.
+func (h *hub) instanceSeen(id uint64) {
+	if id == 0 {
+		return
+	}
+	h.wmu.Lock()
+	defer h.wmu.Unlock()
+	if h.instance == id {
+		return
+	}
+	if h.instance != 0 {
+		h.warmed, h.order = map[uint64]warmResult{}, nil
+		for wid, chs := range h.waiters {
+			for _, ch := range chs {
+				ch <- ErrServerRestarted
+			}
+			delete(h.waiters, wid)
+		}
+	}
+	h.instance = id
+}
+
 // WaitWarm waits for the warm request id returned by WarmOpen or WarmRead.
 // It returns nil when the server reports WARM_DONE and the *WireError when it
 // reports WARM_FAILED. A result that arrived before the call is kept for the
 // last 1024 warms. It does not call the server. It returns ctx.Err() when ctx
-// ends first and ErrClientClosed when the client closes. If the connection
+// ends first and ErrClientClosed when the client closes. When a reconnect
+// shows a new server instance, finished results are dropped and waiters get
+// ErrServerRestarted. If the connection
 // that holds the request drops, no result will come, so pass a ctx with a
 // deadline or watch for EventConnLost.
 func (cl *Client) WaitWarm(ctx context.Context, id uint64) error {

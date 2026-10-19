@@ -1077,6 +1077,7 @@ type HelloResponse struct {
 	Capabilities    []string               `protobuf:"bytes,2,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
 	MaxPayloadBytes uint32                 `protobuf:"varint,3,opt,name=max_payload_bytes,json=maxPayloadBytes,proto3" json:"max_payload_bytes,omitempty"`
 	MaxInflight     uint32                 `protobuf:"varint,4,opt,name=max_inflight,json=maxInflight,proto3" json:"max_inflight,omitempty"`
+	InstanceId      uint64                 `protobuf:"varint,5,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1135,6 +1136,13 @@ func (x *HelloResponse) GetMaxPayloadBytes() uint32 {
 func (x *HelloResponse) GetMaxInflight() uint32 {
 	if x != nil {
 		return x.MaxInflight
+	}
+	return 0
+}
+
+func (x *HelloResponse) GetInstanceId() uint64 {
+	if x != nil {
+		return x.InstanceId
 	}
 	return 0
 }
@@ -4043,12 +4051,14 @@ const file_mountos_fs_proto_rawDesc = "" +
 	"minVersion\x12\x1f\n" +
 	"\vmax_version\x18\x03 \x01(\rR\n" +
 	"maxVersion\x12\"\n" +
-	"\fcapabilities\x18\x04 \x03(\tR\fcapabilities\"\x9c\x01\n" +
+	"\fcapabilities\x18\x04 \x03(\tR\fcapabilities\"\xbd\x01\n" +
 	"\rHelloResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\rR\aversion\x12\"\n" +
 	"\fcapabilities\x18\x02 \x03(\tR\fcapabilities\x12*\n" +
 	"\x11max_payload_bytes\x18\x03 \x01(\rR\x0fmaxPayloadBytes\x12!\n" +
-	"\fmax_inflight\x18\x04 \x01(\rR\vmaxInflight\"D\n" +
+	"\fmax_inflight\x18\x04 \x01(\rR\vmaxInflight\x12\x1f\n" +
+	"\vinstance_id\x18\x05 \x01(\x04R\n" +
+	"instanceId\"D\n" +
 	"\vLinkRequest\x12\x1a\n" +
 	"\bexisting\x18\x01 \x01(\tR\bexisting\x12\x19\n" +
 	"\bnew_path\x18\x02 \x01(\tR\anewPath\"X\n" +

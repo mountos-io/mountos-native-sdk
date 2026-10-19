@@ -134,6 +134,7 @@ export interface HelloResponse {
   capabilities: string[];
   maxPayloadBytes: number;
   maxInflight: number;
+  instanceId: bigint;
 }
 
 export interface LinkRequest {
@@ -1321,7 +1322,7 @@ export const HelloRequest: MessageFns<HelloRequest> = {
 };
 
 function createBaseHelloResponse(): HelloResponse {
-  return { version: 0, capabilities: [], maxPayloadBytes: 0, maxInflight: 0 };
+  return { version: 0, capabilities: [], maxPayloadBytes: 0, maxInflight: 0, instanceId: 0n };
 }
 
 export const HelloResponse: MessageFns<HelloResponse> = {
@@ -1337,6 +1338,12 @@ export const HelloResponse: MessageFns<HelloResponse> = {
     }
     if (message.maxInflight !== 0) {
       writer.uint32(32).uint32(message.maxInflight);
+    }
+    if (message.instanceId !== 0n) {
+      if (BigInt.asUintN(64, message.instanceId) !== message.instanceId) {
+        throw new globalThis.Error("value provided for field message.instanceId of type uint64 too large");
+      }
+      writer.uint32(40).uint64(message.instanceId);
     }
     return writer;
   },
@@ -1384,6 +1391,14 @@ export const HelloResponse: MessageFns<HelloResponse> = {
             }
 
             message.maxInflight = reader.uint32();
+            continue;
+          }
+          case 5: {
+            if (tag !== 40) {
+              break;
+            }
+
+            message.instanceId = reader.uint64() as bigint;
             continue;
           }
         }

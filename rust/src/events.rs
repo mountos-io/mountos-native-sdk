@@ -267,6 +267,10 @@ struct Warms {
   done: HashMap<u64, std::result::Result<(), (String, String)>>,
   order: VecDeque<u64>,
   closed: bool,
+  /// Server instance of the latest Hello. 0 until a server reports one.
+  instance: u64,
+  /// Counts server instance changes. A waiter that sees it move gives up.
+  restarts: u64,
 }
 
 struct WatchEntry {
@@ -396,10 +400,40 @@ impl Hub {
     self.warm_cv.notify_all();
   }
 
+  /// Records the server instance of a Hello. Warm ids restart per server instance, so a new
+  /// instance drops the finished warms and fails the waiters. An id of 0 (an older server)
+  /// changes nothing.
+  pub(crate) fn note_instance(&self, id: u64) {
+    if id == 0 {
+      return;
+    }
+    let mut w = lock(&self.warms);
+    if w.instance == id {
+      return;
+    }
+    let first = w.instance == 0;
+    w.instance = id;
+    if first {
+      return;
+    }
+    w.done.clear();
+    w.order.clear();
+    w.restarts += 1;
+    drop(w);
+    self.warm_cv.notify_all();
+  }
+
   pub(crate) fn wait_warm(&self, id: u64, timeout: Duration) -> Result<()> {
     let deadline = Instant::now().checked_add(timeout);
     let mut w = lock(&self.warms);
+    let restarts = w.restarts;
     loop {
+      if w.restarts != restarts {
+        return Err(Error::Io(io::Error::new(
+          io::ErrorKind::ConnectionAborted,
+          "server restarted, warm result lost",
+        )));
+      }
       if w.closed {
         return Err(Error::Io(io::Error::new(
           io::ErrorKind::ConnectionAborted,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { Client, type ClientEvent, MountosError, OpenFlag } from "../src/index.js";
+import { Client, type ClientEvent, type FileHandle, MountosError, OpenFlag } from "../src/index.js";
 import * as pb from "../src/gen/mountos_fs.js";
 import { BAD_OFFSET, FakeServer } from "./fake_server.js";
 
@@ -202,6 +202,46 @@ describe("bulk operations", () => {
     await client.writeFile("/bw2", data, { truncate: false });
     assert.equal(srv.files.get("/bw2")?.length, 4000);
     assert.deepEqual(srv.files.get("/bw2")!.subarray(0, 2500), data);
+  });
+
+  it("writeFile propagates a close error after a full write and keeps a write error", async () => {
+    const stub = (write: () => Promise<number>): void => {
+      client.open = (): Promise<FileHandle> =>
+        Promise.resolve({
+          write,
+          close: () => Promise.reject(new MountosError("EIO", "flush failed")),
+        } as unknown as FileHandle);
+    };
+    const data = Buffer.alloc(2500, 3);
+    stub(() => Promise.resolve(data.length));
+    await assert.rejects(client.writeFile("/cw", data), (e) => (e as MountosError).message.includes("flush failed"));
+    stub(() => Promise.reject(new MountosError("ENOSPC", "disk full")));
+    await assert.rejects(client.writeFile("/cw", data), (e) => (e as MountosError).code === "ENOSPC");
+  });
+
+  it("readFile reads from zero on one open file when the path is replaced", async () => {
+    srv.files.set("/rep", Buffer.alloc(2500, 0x61));
+    srv.beforeReply = (_s, method): void => {
+      if (method === 10) srv.files.set("/rep", Buffer.alloc(2500, 0x62));
+    };
+    try {
+      assert.deepEqual(await client.readFile("/rep"), Buffer.alloc(2500, 0x62));
+    } finally {
+      srv.beforeReply = undefined;
+    }
+  });
+
+  it("writeBatch sends no later piece of an item after one of its pieces fails", async () => {
+    const f = await client.open("/wf", RW);
+    const w = await f.writeBatch([
+      { offset: BAD_OFFSET, data: Buffer.alloc(2500, 1) },
+      { offset: 0, data: Buffer.alloc(1500, 2) },
+    ]);
+    assert.equal((w[0].error as MountosError).code, "EIO");
+    assert.equal(w[1].written, 1500);
+    const sent = srv.writeBatchReqs.reduce((a, q) => a + q.bytes, 0);
+    assert.equal(sent, 1000 + 1500);
+    await f.close();
   });
 });
 

@@ -36,6 +36,8 @@ type fakeServer struct {
 	conns      []net.Conn
 	caps       []string      // capabilities answered in Hello
 	readSizes  []int         // ranges per ReadBatch request
+	openFlags  []uint32      // flags of each Open request
+	readOffs   []int64       // offset of each ReadAt request
 	statSizes  []int         // paths per StatBatch request
 	nt         fakeNotify    // warm ids, watch ids and notice state
 	violations int           // handle used on a connection that did not open it
@@ -43,8 +45,9 @@ type fakeServer struct {
 	writes     int           // WriteAt frames received
 	maxSeen    int           // largest request payload
 	nextHandle uint64
-	arrived    int // requests waiting at the barrier
-	barrierN   int // when > 0, ReadAt blocks until barrierN requests are in flight at once
+	instance   uint64 // instance_id answered in Hello. Guarded by mu.
+	arrived    int    // requests waiting at the barrier
+	barrierN   int    // when > 0, ReadAt blocks until barrierN requests are in flight at once
 	lim        frame.Limits
 	wmu        sync.Mutex   // serializes frame writes, since watch events are pushed
 	mu         sync.Mutex   // guards the file store, handles and counters
@@ -190,9 +193,9 @@ func (s *fakeServer) handle(f frame.Frame, idx int) (proto.Message, []byte, *wir
 		proto.Unmarshal(f.Meta, &r)
 		s.mu.Lock()
 		s.helloCaps = r.Capabilities
-		caps := s.caps
+		caps, instance := s.caps, s.instance
 		s.mu.Unlock()
-		return &wire.HelloResponse{Version: 1, MaxPayloadBytes: s.maxPayload, MaxInflight: 1, Capabilities: caps}, nil, nil
+		return &wire.HelloResponse{Version: 1, MaxPayloadBytes: s.maxPayload, MaxInflight: 1, Capabilities: caps, InstanceId: instance}, nil, nil
 	case mPing:
 		if s.stall.Add(-1) >= 0 {
 			time.Sleep(time.Second)
@@ -228,6 +231,7 @@ func (s *fakeServer) handle(f frame.Frame, idx int) (proto.Message, []byte, *wir
 		proto.Unmarshal(f.Meta, &r)
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		s.openFlags = append(s.openFlags, r.Flags)
 		if _, ok := s.files[r.Path]; !ok {
 			if r.Flags&uint32(wire.OpenFlag_OPEN_FLAG_CREATE) == 0 {
 				return nil, nil, errno("ENOENT")
@@ -270,6 +274,7 @@ func (s *fakeServer) handle(f frame.Frame, idx int) (proto.Message, []byte, *wir
 		s.waitBarrier()
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		s.readOffs = append(s.readOffs, r.Offset)
 		h, e := s.own(r.Handle, idx)
 		if e != nil {
 			return nil, nil, e

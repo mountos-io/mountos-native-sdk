@@ -67,6 +67,9 @@ var (
 	ErrFileClosed = errors.New("mountos: file closed")
 	// ErrConnLost is returned for a File whose connection broke after it was opened.
 	ErrConnLost = errors.New("mountos: connection lost, handle invalid")
+	// ErrServerRestarted is returned by WaitWarm for a warm request made on a
+	// server instance that was replaced. Its result is lost.
+	ErrServerRestarted = errors.New("mountos: server restarted, warm result lost")
 )
 
 // Error codes the client raises itself. They match the spec names of the same codes.

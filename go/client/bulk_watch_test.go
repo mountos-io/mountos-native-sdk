@@ -232,6 +232,24 @@ func TestReadFileLooping(t *testing.T) {
 	}
 }
 
+// The fallback for a large file reads from offset zero on one descriptor, so the result never
+// mixes two inodes.
+func TestReadFileFallbackReadsFromZero(t *testing.T) {
+	s := newFakeServer(t, 1000)
+	large := pattern(3500, 2)
+	s.files["/large"] = large
+	cl := dial(t, s, 1)
+	got, err := cl.ReadFile("/large")
+	if err != nil || !bytes.Equal(got, large) {
+		t.Fatalf("len %d, %v", len(got), err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.readOffs) == 0 || s.readOffs[0] != 0 {
+		t.Fatalf("read offsets %v, want the first at 0", s.readOffs)
+	}
+}
+
 func TestWriteFile(t *testing.T) {
 	s := newFakeServer(t, 1000)
 	cl := dial(t, s, 1)

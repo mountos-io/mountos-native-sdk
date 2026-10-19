@@ -65,7 +65,7 @@ class HostileServer {
         for (const f of rd.push(c)) {
           if (f.method === 1) {
             s.write(reply(FLAG_RESPONSE, 1, f.requestId, okMeta(pb.HelloResponse, {
-              version: 1, capabilities: [], maxPayloadBytes: 1 << 20, maxInflight: 1,
+              version: 1, capabilities: [], maxPayloadBytes: 1 << 20, maxInflight: 1, instanceId: 0n,
             })));
           } else if (!hostile) {
             s.write(good(f));

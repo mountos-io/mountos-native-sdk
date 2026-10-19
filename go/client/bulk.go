@@ -244,7 +244,7 @@ func (f *File) fanout(groupCount int) []*File {
 		if !sk.hold() {
 			return
 		}
-		sf, err := f.cl.openOn(sk, f.path, f.flags&3, 0)
+		sf, err := f.cl.openOn(sk, f.path, f.flags&(3|wire.OpenFlag_OPEN_FLAG_APPEND), 0)
 		sk.release()
 		if err != nil {
 			return
@@ -395,8 +395,9 @@ type writeGroup struct {
 
 // WriteBatch writes several items in as few requests as the server limits
 // allow. Requests run in parallel on several connections when the file can be
-// opened again by path and no two items overlap. Results are in item order.
-// The File position is not used or changed.
+// opened again by path and no two items overlap. A File opened for append runs
+// the requests one at a time in item order, since the server ignores offsets
+// there. Results are in item order. The File position is not used or changed.
 func (f *File) WriteBatch(items []WriteItem) ([]WriteResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -410,7 +411,7 @@ func (f *File) WriteBatch(items []WriteItem) ([]WriteResult, error) {
 	}
 	gs := groups(pieces(offsets, lengths, f.chunk()), f.chunk())
 	files := []*File{f}
-	if len(gs) > 1 && !overlaps(offsets, lengths) {
+	if len(gs) > 1 && f.flags&wire.OpenFlag_OPEN_FLAG_APPEND == 0 && !overlaps(offsets, lengths) {
 		files = f.fanout(len(gs))
 	}
 	outs := make([]writeGroup, len(gs))
@@ -469,7 +470,8 @@ func (f *File) WriteBatch(items []WriteItem) ([]WriteResult, error) {
 
 // ReadFile returns the whole content of path. One request returns up to the
 // payload limit. For a larger file ReadFile opens it and reads the rest in
-// chunks, so the result is complete but not an atomic snapshot.
+// chunks from offset zero on that one descriptor, so the result comes from a
+// single inode.
 func (cl *Client) ReadFile(path string) ([]byte, error) {
 	if cl.isClosed() {
 		return nil, ErrClientClosed
@@ -497,11 +499,12 @@ func (cl *Client) ReadFile(path string) ([]byte, error) {
 	}
 	defer func() { _ = f.Close() }() // Read-only handle; a close error changes nothing.
 	buf := make([]byte, limit)
+	var all []byte
 	for {
-		n, err := f.ReadAt(buf, int64(len(data)))
-		data = append(data, buf[:n]...)
+		n, err := f.ReadAt(buf, int64(len(all)))
+		all = append(all, buf[:n]...)
 		if errors.Is(err, io.EOF) {
-			return data, nil
+			return all, nil
 		}
 		if err != nil {
 			return nil, err

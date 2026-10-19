@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { Client, FileType, TooManyEntriesError } from "../src/index.js";
+import { Client, FileType, MAX_EMPTY_DIR_PAGES, ProtocolError, TooManyEntriesError } from "../src/index.js";
 import type { DirEntry } from "../src/index.js";
 import { FakeServer } from "./fake_server.js";
 
@@ -33,7 +33,7 @@ describe("directory helper bounds", () => {
     // An endless directory: every page has 100 entries and a next cursor.
     c.ls = (): Promise<LsResult> => {
       calls++;
-      return Promise.resolve({ entries: Array.from({ length: 100 }, (_, i) => entry(`n${i}`, false)), nextCursor: "more" });
+      return Promise.resolve({ entries: Array.from({ length: 100 }, (_, i) => entry(`n${i}`, false)), nextCursor: `more${calls}` });
     };
     await assert.rejects(c.readDirAll("/huge", { maxEntries: 250 }), (e: unknown) => {
       return e instanceof TooManyEntriesError && e.code === "TOO_MANY_ENTRIES" && e.limit === 250 && /250/.test(e.message);
@@ -83,5 +83,63 @@ describe("directory helper bounds", () => {
     assert.equal(count, 450);
     assert.equal(biggest, 100);
     assert.equal(calls, 5);
+  });
+});
+
+describe("directory helper cursor checks", () => {
+  const srv = new FakeServer();
+  let client: Client | undefined;
+
+  before(() => srv.listen());
+  after(() => {
+    client?.close();
+    return srv.close();
+  });
+  beforeEach(() => {
+    client?.close();
+    client = undefined;
+  });
+
+  it("readDirAll rejects a cursor that does not advance", async () => {
+    const c = (client = await Client.connect(srv.sockPath, { poolSize: 1, logger: quiet }));
+    let calls = 0;
+    c.ls = (): Promise<LsResult> => {
+      calls++;
+      return Promise.resolve({ entries: [entry("a", false)], nextCursor: "same" });
+    };
+    await assert.rejects(c.readDirAll("/d"), ProtocolError);
+    assert.equal(calls, 2);
+  });
+
+  it("readDirAll bounds consecutive empty pages", async () => {
+    const c = (client = await Client.connect(srv.sockPath, { poolSize: 1, logger: quiet }));
+    let calls = 0;
+    c.ls = (): Promise<LsResult> => Promise.resolve({ entries: [], nextCursor: String(++calls) });
+    await assert.rejects(c.readDirAll("/d"), ProtocolError);
+    assert.equal(calls, MAX_EMPTY_DIR_PAGES + 1);
+  });
+
+  it("walk rejects a cursor that does not advance and bounds empty pages", async () => {
+    const c = (client = await Client.connect(srv.sockPath, { poolSize: 1, logger: quiet }));
+    c.ls = (_p: string, _m = 0, cursor = ""): Promise<LsResult> => Promise.resolve({ entries: [], nextCursor: cursor === "" ? "x" : cursor });
+    await assert.rejects((async () => { for await (const e of c.walk("/d")) void e; })(), ProtocolError);
+    let calls = 0;
+    c.ls = (): Promise<LsResult> => Promise.resolve({ entries: [], nextCursor: String(++calls) });
+    await assert.rejects((async () => { for await (const e of c.walk("/d")) void e; })(), ProtocolError);
+    assert.equal(calls, MAX_EMPTY_DIR_PAGES + 1);
+  });
+
+  it("readDirAll and walk honour an AbortSignal", async () => {
+    const c = (client = await Client.connect(srv.sockPath, { poolSize: 1, logger: quiet }));
+    const ac = new AbortController();
+    let calls = 0;
+    c.ls = (): Promise<LsResult> => {
+      if (++calls === 2) ac.abort(new Error("stop"));
+      return Promise.resolve({ entries: [entry("a", false)], nextCursor: String(calls) });
+    };
+    await assert.rejects(c.readDirAll("/d", { signal: ac.signal }), /stop/);
+    assert.equal(calls, 2);
+    await assert.rejects((async () => { for await (const e of c.walk("/d", { signal: ac.signal })) void e; })(), /stop/);
+    assert.equal(calls, 2);
   });
 });

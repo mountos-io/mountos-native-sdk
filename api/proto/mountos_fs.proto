@@ -126,6 +126,7 @@ message HelloResponse {
   repeated string capabilities = 2;
   uint32 max_payload_bytes = 3;
   uint32 max_inflight = 4;
+  uint64 instance_id = 5;
 }
 
 message LinkRequest {

@@ -30,7 +30,7 @@
 
 api: mountos.filesystem
 version: 1
-minorVersion: 7
+minorVersion: 8
 
 endpoint:
   # One socket per mount: <home>/.mountOS/sockets/mountos_api_<hash>.sock, where <hash> is the
@@ -122,6 +122,8 @@ messages:
     capabilities: {id: 2, type: repeated string}
     max_payload_bytes: {id: 3, type: uint32, required: true}
     max_inflight: {id: 4, type: uint32, required: true}    # Requests the server accepts at once on one connection. Meaningful with the pipelining capability. Default 32.
+    # Random per server start, never 0. Warm ids restart at 0 per server instance, so a client that sees a different value on reconnect drops its finished warm results. Absent or 0 from an older server.
+    instance_id: {id: 5, type: uint64}
 
   FileInfo:
     name: {id: 1, type: string}
