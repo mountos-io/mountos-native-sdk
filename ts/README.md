@@ -30,6 +30,7 @@ Paths are relative to the mount root.
 
 - POSIX file operations: open, read, write, seek, fsync, truncate, stat, mkdir, rmdir, unlink, rename, symlink, readlink, link, chmod, utimens, statfs, access, and directory listing.
 - Calls that cost one round trip for many items: `ls`, `statBatch`, `readBatch`, `writeBatch`, `readFile`, `writeFile`, and `removeAll`.
+- `clone`, `cloneDir`, and `removeDir`: copy a file, copy a tree, or remove a tree. The tree calls return an `Operation` at once. `await op.wait()` gives the counts and up to 64 failures, and rejects with `OperationStateUnknownError` when notices were lost. `op.cancel()` stops it. `removeAll` is deprecated, use `removeDir`.
 - `watch`: change events for a path on the same connection.
 - `warmOpen` and `warmRead`: ask the mount to bring a file into its local cache.
 - Request pipelining on one connection, per-call timeouts, and one error code set on every operating system.

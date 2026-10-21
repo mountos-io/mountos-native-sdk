@@ -21,6 +21,6 @@ entries, next, err := c.Ls("data", 1000, "")
 err = c.WriteFile("data/new.txt", []byte("hello"), true)
 ```
 
-Paths are relative to the mount root. Batch calls (`Ls`, `StatBatch`, `ReadBatch`, `WriteBatch`, `RemoveAll`), `Watch`, warm calls, request pipelining, and per-call timeouts are described in the [full documentation](https://github.com/mountos-io/mountos-native-sdk).
+Paths are relative to the mount root. `Clone` copies one entry. `CloneDir` and `RemoveDir` start a background operation and return an `*Operation`. `Operation.Wait(ctx)` returns the counts and up to 64 failures, and `ErrOperationStateUnknown` when notices were lost. `Operation.Cancel` stops it. `RemoveAll` is deprecated, use `RemoveDir`. Batch calls (`Ls`, `StatBatch`, `ReadBatch`, `WriteBatch`, `RemoveAll`), `Watch`, warm calls, request pipelining, and per-call timeouts are described in the [full documentation](https://github.com/mountos-io/mountos-native-sdk).
 
 Website: <https://mountos.io>. Apache License 2.0.

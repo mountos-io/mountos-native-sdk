@@ -47,6 +47,9 @@ func (s *fakeServer) handleNotify(f frame.Frame, idx int) (resp proto.Message, w
 		n.warmConn, n.watchConn = map[uint64]int{}, map[uint64]int{}
 	}
 	switch f.Method {
+	case mClone, mCloneDir, mRemoveDir, mOpCancel:
+		resp, werr = s.handleOps(f, idx)
+		return resp, werr, true
 	case mWarmOpen, mWarmRead:
 		if n.full {
 			return nil, errno("EAGAIN"), true

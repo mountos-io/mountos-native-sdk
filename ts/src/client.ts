@@ -10,6 +10,7 @@ import {
 import { ClientOps, FileOps, Method } from "./ops_gen.js";
 import { requireCapability } from "./capability.js";
 import { type ClientEvent, decodeNotice, describeEvent, type Logger } from "./events.js";
+import { type CloneOptions, type CloneOutcome, fromWireOutcome, Operation, toWireOptions } from "./ops.js";
 import { Watch, type WatchOptions } from "./watch.js";
 
 export interface ClientOptions {
@@ -82,6 +83,9 @@ export interface WaitWarmOptions {
 
 const noop = (): void => {};
 
+/** Capabilities asked for in Hello. The server answers with the ones it offers. */
+const CLIENT_CAPABILITIES = ["bulk_io", "ls_stat", "remove_all", "watch", "warm", "pipelining", "clone", "ops"];
+
 /** Default for ClientOptions.maxInflight. */
 export const DEFAULT_MAX_INFLIGHT = 32;
 const MAX_INFLIGHT_CEILING = 1024;
@@ -117,6 +121,8 @@ export class Client extends ClientOps {
   private closed = false;
   private listeners = new Set<(e: ClientEvent) => void>();
   private watches = new Set<Watch>();
+  /** Operations that have not ended, by the connection that runs them and their op id. */
+  private ops = new Map<Conn, Map<bigint, Operation>>();
   private warmWaiters = new Map<bigint, Set<WarmWaiter>>();
   /** Finished warms by id, oldest first. The value is the failure, or undefined for success. */
   private warmDone = new Map<bigint, Error | undefined>();
@@ -192,8 +198,9 @@ export class Client extends ClientOps {
     if (this.closed) return;
     this.closed = true;
     for (const w of [...this.watches]) w.end();
-    for (const sl of this.slots) sl.conn.close();
     const err = new TransportError("client closed");
+    this.failOps(() => true, err);
+    for (const sl of this.slots) sl.conn.close();
     for (const set of this.warmWaiters.values()) for (const w of set) w.reject(err);
     this.warmWaiters.clear();
     this.warmDone.clear();
@@ -367,6 +374,7 @@ export class Client extends ClientOps {
   }
 
   private onConnClosed(conn: Conn, err: Error, byClient: boolean): void {
+    this.failOps((c) => c === conn, err);
     if (this.closed || byClient) return;
     this.reviveWaiters();
     if (!conn.closingSeen) {
@@ -382,6 +390,8 @@ export class Client extends ClientOps {
   private dispatch(conn: Conn, e: ClientEvent): void {
     let taken = this.listeners.size > 0;
     if (e.kind === "warmDone" || e.kind === "warmFailed") taken = this.finishWarm(e) || taken;
+    if (e.kind === "opDone" || e.kind === "opFailed") this.opNotice(conn, e);
+    if (e.kind === "overflow" && !e.fromChange) this.opsOverflow(conn, e.refId);
     if (e.kind === "change" || e.kind === "overflow") {
       for (const w of this.watches) {
         if (w.accepts(conn, e)) {
@@ -397,7 +407,49 @@ export class Client extends ClientOps {
         this.logger.warn(`mountos: event listener threw on ${describeEvent(e)}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
       }
     }
-    if (!taken) this.logger.warn(`mountos: event with no listener ${describeEvent(e)}`);
+    if (!taken && e.kind !== "opDone" && e.kind !== "opFailed") {
+      this.logger.warn(`mountos: event with no listener ${describeEvent(e)}`);
+    }
+  }
+
+  // Records an opFailed or opDone notice on its operation. The operation was registered while the
+  // start reply was read, which comes before any notice for it.
+  private opNotice(conn: Conn, e: ClientEvent): void {
+    const op = this.ops.get(conn)?.get(e.refId);
+    if (!op) return;
+    if (e.kind === "opFailed") {
+      op.addFailure({ path: e.path, code: (e.error as MountosError).code, message: (e.error as MountosError).detail });
+      return;
+    }
+    this.dropOp(conn, op);
+    op.finish(e.counts!);
+  }
+
+  // An overflow notice with ref 0 loses the notices of every operation on the connection. One with
+  // an op id loses the notices of that operation.
+  private opsOverflow(conn: Conn, ref: bigint): void {
+    const m = this.ops.get(conn);
+    if (!m) return;
+    for (const op of [...m.values()]) {
+      if (ref !== 0n && op.id !== ref) continue;
+      this.dropOp(conn, op);
+      op.unknown();
+    }
+  }
+
+  // Ends every pending operation on a connection that matches, with err.
+  private failOps(match: (c: Conn) => boolean, err: Error): void {
+    for (const [conn, m] of [...this.ops]) {
+      if (!match(conn)) continue;
+      this.ops.delete(conn);
+      for (const op of m.values()) op.fail(err);
+    }
+  }
+
+  private dropOp(conn: Conn, op: Operation): void {
+    const m = this.ops.get(conn);
+    m?.delete(op.id);
+    if (m?.size === 0) this.ops.delete(conn);
   }
 
   // Warm ids restart per server instance. A new instance id drops the finished warms and fails
@@ -569,6 +621,56 @@ export class Client extends ClientOps {
     return w!;
   }
 
+  /**
+   * Copies one entry that is not a directory (a file, a symlink, or a special file) and returns
+   * what happened to the destination. Needs the "clone" capability. Without it the call rejects
+   * with UNSUPPORTED_OPERATION.
+   */
+  async clone(from: string, to: string, opts?: CloneOptions): Promise<CloneOutcome> {
+    const options = toWireOptions(opts);
+    const r = dec(pb.CloneResponse, await this.call(Method.Clone, enc(pb.CloneRequest, { from, to, options })));
+    return fromWireOutcome(r.outcome);
+  }
+
+  /**
+   * Starts copying the tree at from to to in the background and returns at once. Needs the "ops"
+   * capability. Rejects with EAGAIN when the server runs too many operations.
+   */
+  cloneDir(from: string, to: string, opts?: CloneOptions): Promise<Operation> {
+    const options = toWireOptions(opts);
+    return this.startOp(Method.CloneDir, enc(pb.CloneDirRequest, { from, to, options }),
+      (f) => dec(pb.CloneDirResponse, f.meta).opId);
+  }
+
+  /**
+   * Starts removing path and everything below it in the background and returns at once. Unlike
+   * removeAll it keeps going after a failed entry and reports each failure. Needs the "ops"
+   * capability. Rejects with EAGAIN when the server runs too many operations.
+   */
+  removeDir(path: string): Promise<Operation> {
+    return this.startOp(Method.RemoveDir, enc(pb.RemoveDirRequest, { path }),
+      (f) => dec(pb.RemoveDirResponse, f.meta).opId);
+  }
+
+  // Sends a start request and registers the operation while the reply is read, so a notice that
+  // follows it in the same chunk finds the operation.
+  private async startOp(method: number, req: Buffer, idOf: (f: Frame) => bigint): Promise<Operation> {
+    this.need(method);
+    let op: Operation | undefined;
+    await this.lease((conn) => conn.call(method, req, undefined, (f) => {
+      const id = idOf(f);
+      op = new Operation(id, async () => {
+        this.need(Method.OpCancel);
+        await conn.call(Method.OpCancel, enc(pb.OpCancelRequest, { opId: id }));
+      });
+      let m = this.ops.get(conn);
+      if (!m) this.ops.set(conn, (m = new Map<bigint, Operation>()));
+      m.set(id, op);
+    }));
+    if (this.closed) throw new TransportError("client closed");
+    return op!;
+  }
+
   /** Sets times in ns. An omitted time is left unchanged. */
   async utimens(path: string, atimeNs?: bigint, mtimeNs?: bigint): Promise<void> {
     await this.call(Method.Utimens, enc(pb.UtimensRequest, {
@@ -672,7 +774,7 @@ export class Client extends ClientOps {
 // Says hello and sets the connection's in-flight limit from the reply. Without the pipelining
 // capability the limit stays 1.
 async function handshake(c: Conn, name: string, maxInflight: number): Promise<HelloResponse> {
-  const req = enc(pb.HelloRequest, { clientName: name, minVersion: 1, maxVersion: 1, capabilities: ["pipelining"] });
+  const req = enc(pb.HelloRequest, { clientName: name, minVersion: 1, maxVersion: 1, capabilities: CLIENT_CAPABILITIES });
   const h = decHello((await c.call(Method.Hello, req)).meta);
   if (h.version !== 1) throw new ProtocolError(`server chose unsupported version ${h.version}`);
   if (h.maxPayloadBytes === 0) throw new ProtocolError("server max_payload_bytes is zero");

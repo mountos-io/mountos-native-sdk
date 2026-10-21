@@ -18,6 +18,7 @@ The SDK has the same operations in Go, TypeScript, and Rust. All three are gener
 - Calls that cost one round trip for many items: `Ls` (a listing with attributes), `StatBatch`, `ReadBatch`, `WriteBatch`, `ReadFile`, `WriteFile`, and `RemoveAll`.
 - `Watch`: change events for a path, delivered on the same connection.
 - `WarmOpen` and `WarmRead`: ask the mount to bring a file into its local cache. The call returns an id at once. The result arrives later as an event.
+- `Clone`, `CloneDir`, and `RemoveDir`: copy a file, copy a tree, or remove a tree inside the mount. A clone moves no data. See [Clone and remove trees](#clone-and-remove-trees).
 - The same error code on every operating system. Each error also has a message that names the operation, the path, and the path component that failed.
 
 Snapshot, fork, and version operations are not part of this API. The mount decides every failure, for example EROFS on a read-only mount. The SDK does not check anything first.
@@ -97,9 +98,55 @@ err = c.WaitWarm(ctx, id)
 
 Warming needs the local cache. A mount started with `--disable-cache-dir` refuses `WarmOpen` and `WarmRead` at once with `UNSUPPORTED_OPERATION`.
 
+## Clone and remove trees
+
+These calls work inside one mount. Paths are relative to the mount root, as in the other path calls. A clone moves no data.
+
+| Operation | Id | Capability | What it does |
+| --- | --- | --- | --- |
+| `Clone` | 56 | `clone` | Copies one entry that is not a directory (file, symlink, or special file). It replies when done with `cloned`, `overwritten`, or `skipped`. |
+| `CloneDir` | 57 | `ops` | Starts copying a tree. It returns an `Operation` at once. |
+| `RemoveDir` | 58 | `ops` | Starts removing a tree. It keeps going after a failed entry and reports each failure. It returns an `Operation` at once. |
+| `OpCancel` | 59 | `ops` | Asks a running operation to stop. `Operation.Cancel` calls it. |
+| `RemoveAll` | 55 | `remove_all` | Deprecated: use `RemoveDir`. The server still serves it. It stops at the first error. |
+
+Options for `Clone` and `CloneDir`: `overwrite` replaces a destination that differs (without it the call fails with `EEXIST`). `preserve` lists extra properties to copy: `times`, `xattr`, `acl`. A source with a trailing slash must be a directory. A destination with a trailing slash names a directory. A destination inside its source fails with `EINVAL`. The names the mount keeps for itself at the root, such as `.mountOS`, fail with `EPERM`.
+
+An operation is not a job. The server keeps no record of it after it ends, and there is no status call and no resume. The start call returns an operation id. The result arrives as events on the connection that started it:
+
+- `OpFailed`: one entry failed. It has the path (relative to the mount root, empty when the name is not valid UTF-8), the code, and a message. The server sends at most 64 of them per operation.
+- `OpDone`: the operation ended. It carries the totals: cloned, overwritten, skipped, failed, removed, and protected. `failed` can be larger than the number of `OpFailed` events.
+
+`Operation.Wait` returns the totals and the kept failures (up to 64) once the end arrives. It fails with an "operation state unknown" error when notices were lost (an overflow notice), because the end can no longer be known. It fails with a connection error when the connection drops or the client closes, so it never waits for ever. The server limits the running operations per connection and per mount. At the limit a start call fails with `EAGAIN`. Cancel an operation on the client that started it. An operation that already ended fails with `ENOENT`.
+
+A server that does not report `clone` or `ops` fails these calls at once with `UNSUPPORTED_OPERATION`. Windows mounts do not report them.
+
+```go
+out, err := c.Clone("a/file", "b/file", &client.CloneOptions{Overwrite: true})  // Go
+
+op, err := c.CloneDir("src", "dst", nil)
+counts, failures, err := op.Wait(ctx)
+```
+
+```ts
+const out = await c.clone("a/file", "b/file", { overwrite: true, preserve: ["times"] });   // TypeScript
+
+const op = await c.cloneDir("src", "dst");
+const { counts, failures } = await op.wait();
+```
+
+```rust
+let out = c.clone_entry("a/file", "b/file", &CloneOptions::default().with_overwrite(true))?;   // Rust
+
+let op = c.clone_dir("src", "dst", &CloneOptions::default())?;
+let result = op.wait(Duration::from_secs(600))?;
+```
+
+`clone` is not a Rust method name here because `Client` already has `Clone::clone`.
+
 ## Pool, timeouts and helpers
 
-Every language works the same way. A call runs on the pooled connection with the fewest outstanding calls. When the server reports the `pipelining` capability, several calls overlap on one connection and replies match by request id. A timeout fails only the call that ran over, and its late reply is dropped. Without pipelining, or after too many abandoned replies, the connection is dropped and dialed again. When the server reports its capabilities, a call the server does not offer (`watch`, warm calls, `ls`, `remove_all`, bulk calls) fails at once with `UNSUPPORTED_OPERATION`.
+Every language works the same way. A call runs on the pooled connection with the fewest outstanding calls. When the server reports the `pipelining` capability, several calls overlap on one connection and replies match by request id. A timeout fails only the call that ran over, and its late reply is dropped. Without pipelining, or after too many abandoned replies, the connection is dropped and dialed again. When the server reports its capabilities, a call the server does not offer (`watch`, warm calls, `ls`, `remove_all`, `clone`, `ops`, bulk calls) fails at once with `UNSUPPORTED_OPERATION`.
 
 ### Go
 

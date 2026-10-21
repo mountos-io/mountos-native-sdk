@@ -34,6 +34,8 @@ const (
 	EventOverflow                    // Events were dropped. List watched paths again.
 	EventClosing                     // The server is about to close this connection.
 	EventConnLost                    // A connection dropped unexpectedly. Err says why.
+	EventOpDone                      // An operation ended. RefID is the op id. Counts has the totals.
+	EventOpFailed                    // One entry of an operation failed. RefID is the op id. Err is a *WireError.
 )
 
 func (k EventKind) String() string {
@@ -50,6 +52,10 @@ func (k EventKind) String() string {
 		return "closing"
 	case EventConnLost:
 		return "conn_lost"
+	case EventOpDone:
+		return "op_done"
+	case EventOpFailed:
+		return "op_failed"
 	}
 	return fmt.Sprintf("EventKind(%d)", int(k))
 }
@@ -85,14 +91,15 @@ func (k ChangeKind) String() string {
 // Event is one server notice or local connection event.
 type Event struct {
 	Time    time.Time
-	Err     error // *WireError for EventWarmFailed, a plain error for EventConnLost.
+	Err     error // *WireError for EventWarmFailed and EventOpFailed, a plain error for EventConnLost.
 	src     *sock // connection the event came from. nil for events made by the client.
 	Path    string
 	OldPath string
 
+	Counts   OpCounts // Set for EventOpDone.
 	Kind     EventKind
 	Sequence uint64
-	RefID    uint64     // Warm id or watch id. 0 when it does not apply.
+	RefID    uint64     // Warm id, watch id or op id. 0 when it does not apply.
 	Change   ChangeKind // Set for EventChange.
 }
 
@@ -122,6 +129,9 @@ type hub struct {
 	waiters map[uint64][]chan error
 	warmed  map[uint64]warmResult
 
+	// Guarded by opmu: ops, opOrphans.
+	ops map[opKey]*opState
+
 	// Guarded by lmu: watches, listeners, nextLID.
 	watches   map[*Watch]struct{}
 	listeners []listener
@@ -129,15 +139,17 @@ type hub struct {
 	// Guarded by qmu: q, dropped, stopped.
 	q []Event
 
-	order    []uint64 // warm ids in cache, oldest first
-	instance uint64   // server instance of the last Hello. 0 when that server reports none.
-	dropped  int
-	nextLID  uint64
-	qmu      sync.Mutex
-	lmu      sync.Mutex
-	wmu      sync.Mutex
-	inCall   atomic.Bool // a listener is running, possibly the caller of shutdown
-	stopped  bool
+	order     []uint64 // warm ids in cache, oldest first
+	instance  uint64   // server instance of the last Hello. 0 when that server reports none.
+	dropped   int
+	nextLID   uint64
+	opOrphans int // states in ops that no Operation has claimed
+	opmu      sync.Mutex
+	qmu       sync.Mutex
+	lmu       sync.Mutex
+	wmu       sync.Mutex
+	inCall    atomic.Bool // a listener is running, possibly the caller of shutdown
+	stopped   bool
 	// instanceKnown is true once a Hello has been seen, so a first connect
 	// differs from a reconnect to a server that reports no id.
 	instanceKnown bool
@@ -151,6 +163,7 @@ func newHub(l Logger) *hub {
 		log: l, watches: map[*Watch]struct{}{},
 		wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
 		warmed: map[uint64]warmResult{}, waiters: map[uint64][]chan error{},
+		ops: map[opKey]*opState{},
 	}
 	go h.run()
 	return h
@@ -227,6 +240,15 @@ func (h *hub) notice(sk *sock, f frame.Frame) {
 		ev.OldPath = n.GetOldPath()
 	case wire.NoticeKind_NOTICE_KIND_OVERFLOW:
 		ev.Kind = EventOverflow
+		h.opsOverflow(sk, ev.RefID)
+	case wire.NoticeKind_NOTICE_KIND_OP_DONE:
+		ev.Kind = EventOpDone
+		h.opNotice(sk, &n)
+		ev.Counts = countsOf(&n)
+	case wire.NoticeKind_NOTICE_KIND_OP_FAILED:
+		ev.Kind = EventOpFailed
+		ev.Err = &WireError{Code: n.GetCode(), Message: n.GetMessage()}
+		h.opNotice(sk, &n)
 	case wire.NoticeKind_NOTICE_KIND_CLOSING:
 		ev.Kind = EventClosing
 	default:
@@ -250,7 +272,7 @@ func (h *hub) emit(ev Event) {
 	listening := len(h.listeners) > 0
 	h.lmu.Unlock()
 	if !listening {
-		if !taken {
+		if !taken && ev.Kind != EventOpDone && ev.Kind != EventOpFailed { // an Operation keeps these
 			h.log.Printf("%s: %s", listenerNote, describe(ev))
 		}
 		return

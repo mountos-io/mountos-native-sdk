@@ -44,6 +44,10 @@ pub mod method {
   pub const READ_FILE: u16 = 53;
   pub const WRITE_FILE: u16 = 54;
   pub const REMOVE_ALL: u16 = 55;
+  pub const CLONE: u16 = 56;
+  pub const CLONE_DIR: u16 = 57;
+  pub const REMOVE_DIR: u16 = 58;
+  pub const OP_CANCEL: u16 = 59;
   pub const WATCH: u16 = 60;
   pub const UNWATCH: u16 = 61;
   pub const WARM_OPEN: u16 = 70;
@@ -207,7 +211,7 @@ impl Client {
       .map(drop)
   }
 
-  /// Removes path and everything below it. Returns the removed entry count.
+  /// Deprecated: use RemoveDir. Removes path and everything below it. Returns the removed entry count.
   pub fn remove_all(&self, path: &str) -> Result<u64> {
     let r: RemoveAllResponse = self.unary(method::REMOVE_ALL, &RemoveAllRequest { path: path.into() })?;
     Ok(r.removed)

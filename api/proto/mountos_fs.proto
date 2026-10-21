@@ -6,6 +6,12 @@ package mountos.filesystem.v1;
 
 option go_package = "github.com/mountos-io/mountos-native-sdk/go/wire;wire";
 
+enum CloneOutcome {
+  CLONE_OUTCOME_CLONED = 0;
+  CLONE_OUTCOME_OVERWRITTEN = 1;
+  CLONE_OUTCOME_SKIPPED = 2;
+}
+
 enum FileType {
   FILE_TYPE_REGULAR = 0;
   FILE_TYPE_DIRECTORY = 1;
@@ -18,6 +24,8 @@ enum NoticeKind {
   NOTICE_KIND_CLOSING = 2;
   NOTICE_KIND_OVERFLOW = 3;
   NOTICE_KIND_CHANGE = 4;
+  NOTICE_KIND_OP_DONE = 5;
+  NOTICE_KIND_OP_FAILED = 6;
 }
 
 enum OpenFlag {
@@ -28,6 +36,12 @@ enum OpenFlag {
   OPEN_FLAG_EXCL = 128;
   OPEN_FLAG_TRUNC = 512;
   OPEN_FLAG_APPEND = 1024;
+}
+
+enum PreserveKind {
+  PRESERVE_KIND_TIMES = 0;
+  PRESERVE_KIND_XATTR = 1;
+  PRESERVE_KIND_ACL = 2;
 }
 
 enum WatchEventKind {
@@ -59,6 +73,31 @@ message BatchItemError {
 message ChmodRequest {
   string path = 1;
   uint32 mode = 2;
+}
+
+message CloneDirRequest {
+  string from = 1;
+  string to = 2;
+  CloneOptions options = 3;
+}
+
+message CloneDirResponse {
+  uint64 op_id = 1;
+}
+
+message CloneOptions {
+  bool overwrite = 1;
+  repeated PreserveKind preserve = 2;
+}
+
+message CloneRequest {
+  string from = 1;
+  string to = 2;
+  CloneOptions options = 3;
+}
+
+message CloneResponse {
+  CloneOutcome outcome = 1;
 }
 
 message CloseRequest {
@@ -167,6 +206,16 @@ message Notice {
   string message = 6;
   WatchEventKind change_kind = 7;
   string old_path = 8;
+  uint64 cloned = 9;
+  uint64 overwritten = 10;
+  uint64 skipped = 11;
+  uint64 failed = 12;
+  uint64 removed = 13;
+  uint64 protected = 14;
+}
+
+message OpCancelRequest {
+  uint64 op_id = 1;
 }
 
 message OpenRequest {
@@ -254,6 +303,14 @@ message RemoveAllRequest {
 
 message RemoveAllResponse {
   uint64 removed = 1;
+}
+
+message RemoveDirRequest {
+  string path = 1;
+}
+
+message RemoveDirResponse {
+  uint64 op_id = 1;
 }
 
 message RenameRequest {

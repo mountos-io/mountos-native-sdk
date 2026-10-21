@@ -30,7 +30,7 @@ const (
 var limits = frame.Limits{MaxMetaBytes: maxMetaBytes, MaxPayloadBytes: maxPayloadBytes}
 
 // helloCapabilities are the capabilities this client asks for in Hello.
-var helloCapabilities = []string{"bulk_io", "ls_stat", "remove_all", "watch", "warm", capPipelining}
+var helloCapabilities = []string{"bulk_io", "ls_stat", "remove_all", "watch", "warm", capPipelining, "clone", "ops"}
 
 // waiter is the reply slot of one request. The reader sends at most one frame.
 type waiter struct{ ch chan frame.Frame }
@@ -70,7 +70,8 @@ type sock struct {
 	pmu        sync.Mutex
 	wmu        sync.Mutex // serializes request writes
 	ready      atomic.Bool
-	closing    atomic.Bool // set when this side closes the socket on purpose
+	closing    atomic.Bool   // set when this side closes the socket on purpose
+	overflows  atomic.Uint64 // connection-level OVERFLOW notices seen
 }
 
 // setErr records why the socket ended. The first reason wins.
@@ -252,6 +253,11 @@ func (c *conn) readLoop(sk *sock) {
 	}
 	_ = sk.nc.Close() // The read loop ended; the stored error is the reason.
 	close(sk.dead)
+	if c.cl.isClosed() {
+		c.cl.hub.opsLost(sk, ErrClientClosed)
+	} else {
+		c.cl.hub.opsLost(sk, sk.lostErr())
+	}
 	if !sk.closing.Load() {
 		c.cl.hub.connLost(sk)
 	}

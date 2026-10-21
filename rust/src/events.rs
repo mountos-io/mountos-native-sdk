@@ -4,6 +4,7 @@
 
 use crate::client::Client;
 use crate::error::{Error, Result};
+use crate::ops::{OpCounts, OpState};
 use crate::wire::{self, WatchEventKind};
 use std::collections::{HashMap, VecDeque};
 use std::io;
@@ -42,6 +43,11 @@ pub enum EventKind {
   /// A connection ended without a Closing notice or a local close. `error` says why.
   /// This event is local, the server does not send it.
   ConnectionLost,
+  /// An operation ended. `ref_id` is the op id and `counts` has the totals.
+  OpDone,
+  /// One entry of an operation failed. `ref_id` is the op id, `path` names the entry (empty when
+  /// the name is not valid UTF-8) and `error` says why.
+  OpFailed,
 }
 
 /// How a watched path changed. New kinds can be added, so a `match` needs a wildcard arm.
@@ -69,8 +75,12 @@ pub struct Event {
   pub old_path: String,
   /// Set for `Change`.
   pub change: Option<ChangeKind>,
-  /// `Error::Server` for `WarmFailed`, an `Error::Io` for `ConnectionLost`.
+  /// `Error::Server` for `WarmFailed` and `OpFailed`, an `Error::Io` for `ConnectionLost`.
   pub error: Option<Error>,
+  /// Set for `OpDone`.
+  pub counts: Option<OpCounts>,
+  /// True for the overflow marker inside a change notice, which concerns one watch only.
+  pub(crate) from_change: bool,
   /// When the client received the event.
   pub time: SystemTime,
 }
@@ -85,6 +95,8 @@ impl Clone for Event {
       old_path: self.old_path.clone(),
       change: self.change,
       error: self.error.as_ref().map(Error::dup),
+      counts: self.counts,
+      from_change: self.from_change,
       time: self.time,
     }
   }
@@ -100,6 +112,8 @@ impl Event {
       old_path: String::new(),
       change: None,
       error,
+      counts: None,
+      from_change: false,
       time: SystemTime::now(),
     }
   }
@@ -112,6 +126,8 @@ impl Event {
       wire::NoticeKind::WarmFailed => EventKind::WarmFailed,
       wire::NoticeKind::Closing => EventKind::Closing,
       wire::NoticeKind::Overflow => EventKind::Overflow,
+      wire::NoticeKind::OpDone => EventKind::OpDone,
+      wire::NoticeKind::OpFailed => EventKind::OpFailed,
       wire::NoticeKind::Change => {
         change = match WatchEventKind::try_from(m.change_kind).ok()? {
           WatchEventKind::Create => Some(ChangeKind::Create),
@@ -128,7 +144,9 @@ impl Event {
         }
       }
     };
-    let error = (kind == EventKind::WarmFailed).then_some(Error::Server {
+    let from_change = kind == EventKind::Overflow && m.kind == wire::NoticeKind::Change as i32;
+    let counts = (kind == EventKind::OpDone).then(|| OpCounts::from_notice(&m));
+    let error = matches!(kind, EventKind::WarmFailed | EventKind::OpFailed).then_some(Error::Server {
       code: m.code,
       message: m.message,
     });
@@ -140,6 +158,8 @@ impl Event {
       old_path: m.old_path,
       change,
       error,
+      counts,
+      from_change,
       time: SystemTime::now(),
     })
   }
@@ -290,6 +310,8 @@ pub(crate) struct Hub {
   warms: Mutex<Warms>,
   warm_cv: Condvar,
   watches: Mutex<HashMap<u64, WatchEntry>>,
+  /// Operations that have not ended, by connection id and op id.
+  ops: Mutex<HashMap<(u64, u64), Arc<OpState>>>,
   /// Counts the background threads of the client that are still running.
   threads: Arc<AtomicUsize>,
 }
@@ -323,6 +345,7 @@ impl Hub {
       warms: Mutex::new(Warms::default()),
       warm_cv: Condvar::new(),
       watches: Mutex::new(HashMap::new()),
+      ops: Mutex::new(HashMap::new()),
       threads: Arc::new(AtomicUsize::new(0)),
     }
   }
@@ -352,10 +375,70 @@ impl Hub {
     });
   }
 
+  /// Registers a running operation. The reader calls it while it hands over the start reply, so
+  /// every later notice of the operation finds it.
+  pub(crate) fn add_op(&self, id: u64, conn: u64, st: Arc<OpState>) {
+    lock(&self.ops).insert((conn, id), st);
+  }
+
+  /// Ends the operations of a connection that is gone, with a copy of `err`.
+  pub(crate) fn ops_lost(&self, conn: u64, err: &Error) {
+    let lost: Vec<Arc<OpState>> = {
+      let mut ops = lock(&self.ops);
+      let keys: Vec<_> = ops.keys().filter(|(c, _)| *c == conn).copied().collect();
+      keys.iter().filter_map(|k| ops.remove(k)).collect()
+    };
+    for st in lost {
+      st.fail(err.dup());
+    }
+  }
+
+  fn op_notice(&self, conn: u64, ev: &Event) {
+    let st = if ev.kind == EventKind::OpDone {
+      lock(&self.ops).remove(&(conn, ev.ref_id))
+    } else {
+      lock(&self.ops).get(&(conn, ev.ref_id)).cloned()
+    };
+    let Some(st) = st else { return };
+    match (&ev.kind, &ev.error, ev.counts) {
+      (EventKind::OpFailed, Some(Error::Server { code, message }), _) => st.add_failure(crate::ops::OpFailure::new(
+        ev.path.clone(),
+        code.clone(),
+        message.clone(),
+      )),
+      (EventKind::OpDone, _, Some(counts)) => st.finish(counts),
+      _ => {}
+    }
+  }
+
+  /// An overflow notice with ref 0 loses the notices of every operation on the connection. One
+  /// with an op id loses the notices of that operation.
+  fn ops_overflow(&self, conn: u64, reference: u64) {
+    let lost: Vec<Arc<OpState>> = {
+      let mut ops = lock(&self.ops);
+      let keys: Vec<_> = ops
+        .keys()
+        .filter(|(c, id)| *c == conn && (reference == 0 || *id == reference))
+        .copied()
+        .collect();
+      keys.iter().filter_map(|k| ops.remove(k)).collect()
+    };
+    for st in lost {
+      st.fail(Error::OperationStateUnknown);
+    }
+  }
+
   /// Handles one event: settles warm waits, feeds the watch queue, queues it for listeners.
   /// `conn` is the connection the event came from, or `None` for a local event. A server
   /// Overflow without a watch id applies to every watch of that connection.
   pub(crate) fn publish(&self, conn: Option<u64>, ev: Event) {
+    if let Some(conn) = conn {
+      match ev.kind {
+        EventKind::OpDone | EventKind::OpFailed => self.op_notice(conn, &ev),
+        EventKind::Overflow if !ev.from_change => self.ops_overflow(conn, ev.ref_id),
+        _ => {}
+      }
+    }
     match ev.kind {
       EventKind::WarmDone | EventKind::WarmFailed => self.record_warm(&ev),
       EventKind::Overflow if ev.ref_id == 0 => {
@@ -473,6 +556,11 @@ impl Hub {
     }
     lock(&self.warms).closed = true;
     self.warm_cv.notify_all();
+    let closed = Error::Io(io::Error::new(io::ErrorKind::ConnectionAborted, "client closed"));
+    let lost: Vec<Arc<OpState>> = lock(&self.ops).drain().map(|(_, st)| st).collect();
+    for st in lost {
+      st.fail(closed.dup());
+    }
   }
 
   /// Drops all listeners, which releases anything they captured.
@@ -486,7 +574,10 @@ impl Hub {
     while let Some(ev) = self.queue.pop(None) {
       let ls: Vec<Listener> = lock(&self.listeners).iter().map(|(_, l)| l.clone()).collect();
       if ls.is_empty() {
-        self.log(&ev.log_line());
+        // An Operation keeps its own notices.
+        if !matches!(ev.kind, EventKind::OpDone | EventKind::OpFailed) {
+          self.log(&ev.log_line());
+        }
         continue;
       }
       for l in ls {
@@ -515,6 +606,12 @@ impl Client {
   #[doc(hidden)]
   pub fn thread_probe(&self) -> Arc<AtomicUsize> {
     self.inner.hub.thread_probe()
+  }
+
+  /// Count of operations that have not ended, for tests.
+  #[doc(hidden)]
+  pub fn pending_ops(&self) -> usize {
+    lock(&self.inner.hub.ops).len()
   }
 
   /// Removes a listener. An unknown id does nothing.

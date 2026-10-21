@@ -210,7 +210,19 @@ fn calls_overlap_and_out_of_order_replies_reach_their_callers() {
     s.reverse = true;
   });
   let c = client(&srv, 1, 5000, 32);
-  assert_eq!(*srv.sh.client_caps.lock().unwrap(), ["pipelining"]);
+  let asked = srv.sh.client_caps.lock().unwrap().clone();
+  for want in [
+    "pipelining",
+    "bulk_io",
+    "ls_stat",
+    "remove_all",
+    "watch",
+    "warm",
+    "clone",
+    "ops",
+  ] {
+    assert!(asked.iter().any(|c| c == want), "Hello lacks {want}: {asked:?}");
+  }
   std::thread::scope(|sc| {
     for i in 0..8 {
       let c = &c;

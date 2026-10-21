@@ -158,7 +158,7 @@ const cases: Case[] = [
     act: firstOnly((s, f) => s.write(good(f))) },
   { name: "notice with unknown kind", call: (c) => c.ping(),
     act: (s, f) => {
-      const n = okMeta(pb.Notice, { kind: 9999, sequence: 1n, refId: 0n, path: "", code: "", message: "", changeKind: 0, oldPath: "" });
+      const n = okMeta(pb.Notice, { kind: 9999 as pb.NoticeKind, sequence: 1n, refId: 0n, path: "", code: "", message: "", changeKind: 0, oldPath: "", cloned: 0n, overwritten: 0n, skipped: 0n, failed: 0n, removed: 0n, protected: 0n });
       s.write(reply(FLAG_NOTIFY, 62, f.requestId, n));
       s.write(good(f));
       return true;

@@ -2,15 +2,28 @@ import { MountosError } from "./errors.js";
 import * as pb from "./gen/mountos_fs.js";
 import { dec } from "./api.js";
 
-export type ClientEventKind = "warmDone" | "warmFailed" | "change" | "overflow" | "closing" | "connectionLost";
+export type ClientEventKind =
+  | "warmDone" | "warmFailed" | "change" | "overflow" | "closing" | "connectionLost" | "opDone" | "opFailed";
+
+/** Totals an operation reports when it ends. failed can exceed the number of failures kept. */
+export interface OpCounts {
+  cloned: bigint;
+  overwritten: bigint;
+  skipped: bigint;
+  failed: bigint;
+  removed: bigint;
+  protected: bigint;
+}
 export type ChangeKind = "create" | "remove" | "write" | "rename" | "attrib";
 
 /**
  * A server notice or a local connection event.
- * refId is the warm id for warm events and the watch id for change and overflow events.
+ * refId is the warm id for warm events, the watch id for change and overflow events, and the op
+ * id for opDone and opFailed events.
  * An overflow event means notices were dropped, so list the watched path again. Its refId is 0
  * when the loss is not tied to one watch. error is a MountosError for warmFailed and a plain
- * Error for connectionLost. For a rename, path is the new name and oldPath the old one.
+ * Error for connectionLost. For opFailed it is a MountosError and path names the failing entry.
+ * counts is set for opDone. For a rename, path is the new name and oldPath the old one.
  */
 export interface ClientEvent {
   kind: ClientEventKind;
@@ -20,6 +33,9 @@ export interface ClientEvent {
   oldPath: string;
   change?: ChangeKind;
   error?: Error;
+  counts?: OpCounts;
+  /** True for the overflow marker inside a change notice. It concerns one watch, never an operation. */
+  fromChange?: boolean;
   time: Date;
 }
 
@@ -34,6 +50,8 @@ const KINDS: Partial<Record<number, ClientEventKind>> = {
   [pb.NoticeKind.NOTICE_KIND_CHANGE]: "change",
   [pb.NoticeKind.NOTICE_KIND_OVERFLOW]: "overflow",
   [pb.NoticeKind.NOTICE_KIND_CLOSING]: "closing",
+  [pb.NoticeKind.NOTICE_KIND_OP_DONE]: "opDone",
+  [pb.NoticeKind.NOTICE_KIND_OP_FAILED]: "opFailed",
 };
 
 const CHANGES: Partial<Record<number, ChangeKind>> = {
@@ -55,10 +73,17 @@ export function decodeNotice(meta: Buffer): ClientEvent | undefined {
   const e: ClientEvent = {
     kind, sequence: m.sequence, refId: m.refId, path: m.path, oldPath: m.oldPath, time: new Date(),
   };
-  if (kind === "warmFailed") e.error = new MountosError(m.code || "EIO", m.message);
+  if (kind === "warmFailed" || kind === "opFailed") e.error = new MountosError(m.code || "EIO", m.message);
+  if (kind === "opDone") {
+    e.counts = {
+      cloned: m.cloned, overwritten: m.overwritten, skipped: m.skipped,
+      failed: m.failed, removed: m.removed, protected: m.protected,
+    };
+  }
   if (kind === "change") {
     if (m.changeKind === pb.WatchEventKind.WATCH_EVENT_KIND_OVERFLOW) {
       e.kind = "overflow";
+      e.fromChange = true;
       return e;
     }
     const change = CHANGES[m.changeKind];

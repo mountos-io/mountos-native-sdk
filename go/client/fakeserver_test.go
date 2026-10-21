@@ -18,6 +18,7 @@ import (
 
 // fakeServer speaks the frame protocol over a unix socket with an in-memory file store.
 type fakeServer struct {
+	ops        fakeOps // operation ids and scripted answers
 	ln         net.Listener
 	files      map[string][]byte
 	release    chan struct{}            // barrierN gate: closed when barrierN requests are in flight
@@ -134,6 +135,9 @@ func (s *fakeServer) serve(c net.Conn, idx int) {
 		s.reply(c, f, resp, data, werr)
 		if f.Method == mWatch && werr == nil {
 			s.afterWatch(idx, f, resp)
+		}
+		if werr == nil && (f.Method == mCloneDir || f.Method == mRemoveDir) {
+			s.afterOpStart(idx, resp)
 		}
 	}
 }

@@ -9,6 +9,13 @@ import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
 
 export const protobufPackage = "mountos.filesystem.v1";
 
+export enum CloneOutcome {
+  CLONE_OUTCOME_CLONED = 0,
+  CLONE_OUTCOME_OVERWRITTEN = 1,
+  CLONE_OUTCOME_SKIPPED = 2,
+  UNRECOGNIZED = -1,
+}
+
 export enum FileType {
   FILE_TYPE_REGULAR = 0,
   FILE_TYPE_DIRECTORY = 1,
@@ -22,6 +29,8 @@ export enum NoticeKind {
   NOTICE_KIND_CLOSING = 2,
   NOTICE_KIND_OVERFLOW = 3,
   NOTICE_KIND_CHANGE = 4,
+  NOTICE_KIND_OP_DONE = 5,
+  NOTICE_KIND_OP_FAILED = 6,
   UNRECOGNIZED = -1,
 }
 
@@ -33,6 +42,13 @@ export enum OpenFlag {
   OPEN_FLAG_EXCL = 128,
   OPEN_FLAG_TRUNC = 512,
   OPEN_FLAG_APPEND = 1024,
+  UNRECOGNIZED = -1,
+}
+
+export enum PreserveKind {
+  PRESERVE_KIND_TIMES = 0,
+  PRESERVE_KIND_XATTR = 1,
+  PRESERVE_KIND_ACL = 2,
   UNRECOGNIZED = -1,
 }
 
@@ -67,6 +83,31 @@ export interface BatchItemError {
 export interface ChmodRequest {
   path: string;
   mode: number;
+}
+
+export interface CloneDirRequest {
+  from: string;
+  to: string;
+  options?: CloneOptions | undefined;
+}
+
+export interface CloneDirResponse {
+  opId: bigint;
+}
+
+export interface CloneOptions {
+  overwrite: boolean;
+  preserve: PreserveKind[];
+}
+
+export interface CloneRequest {
+  from: string;
+  to: string;
+  options?: CloneOptions | undefined;
+}
+
+export interface CloneResponse {
+  outcome: CloneOutcome;
 }
 
 export interface CloseRequest {
@@ -175,6 +216,16 @@ export interface Notice {
   message: string;
   changeKind: WatchEventKind;
   oldPath: string;
+  cloned: bigint;
+  overwritten: bigint;
+  skipped: bigint;
+  failed: bigint;
+  removed: bigint;
+  protected: bigint;
+}
+
+export interface OpCancelRequest {
+  opId: bigint;
 }
 
 export interface OpenRequest {
@@ -262,6 +313,14 @@ export interface RemoveAllRequest {
 
 export interface RemoveAllResponse {
   removed: bigint;
+}
+
+export interface RemoveDirRequest {
+  path: string;
+}
+
+export interface RemoveDirResponse {
+  opId: bigint;
 }
 
 export interface RenameRequest {
@@ -576,6 +635,306 @@ export const ChmodRequest: MessageFns<ChmodRequest> = {
             }
 
             message.mode = reader.uint32();
+            continue;
+          }
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skip(tag & 7);
+      }
+      return message;
+    } finally {
+      (reader as any).__tsProtoDecodeDepth = previousRecursionDepth;
+    }
+  },
+};
+
+function createBaseCloneDirRequest(): CloneDirRequest {
+  return { from: "", to: "", options: undefined };
+}
+
+export const CloneDirRequest: MessageFns<CloneDirRequest> = {
+  encode(message: CloneDirRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.from !== "") {
+      writer.uint32(10).string(message.from);
+    }
+    if (message.to !== "") {
+      writer.uint32(18).string(message.to);
+    }
+    if (message.options !== undefined) {
+      CloneOptions.encode(message.options, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CloneDirRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const previousRecursionDepth = (reader as any).__tsProtoDecodeDepth ?? 0;
+    if (previousRecursionDepth >= 100) {
+      throw new globalThis.Error("protobuf decode recursion limit exceeded");
+    }
+    (reader as any).__tsProtoDecodeDepth = previousRecursionDepth + 1;
+    try {
+      const end = length === undefined ? reader.len : reader.pos + length;
+      const message = createBaseCloneDirRequest();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1: {
+            if (tag !== 10) {
+              break;
+            }
+
+            message.from = reader.string();
+            continue;
+          }
+          case 2: {
+            if (tag !== 18) {
+              break;
+            }
+
+            message.to = reader.string();
+            continue;
+          }
+          case 3: {
+            if (tag !== 26) {
+              break;
+            }
+
+            message.options = CloneOptions.decode(reader, reader.uint32());
+            continue;
+          }
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skip(tag & 7);
+      }
+      return message;
+    } finally {
+      (reader as any).__tsProtoDecodeDepth = previousRecursionDepth;
+    }
+  },
+};
+
+function createBaseCloneDirResponse(): CloneDirResponse {
+  return { opId: 0n };
+}
+
+export const CloneDirResponse: MessageFns<CloneDirResponse> = {
+  encode(message: CloneDirResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.opId !== 0n) {
+      if (BigInt.asUintN(64, message.opId) !== message.opId) {
+        throw new globalThis.Error("value provided for field message.opId of type uint64 too large");
+      }
+      writer.uint32(8).uint64(message.opId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CloneDirResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const previousRecursionDepth = (reader as any).__tsProtoDecodeDepth ?? 0;
+    if (previousRecursionDepth >= 100) {
+      throw new globalThis.Error("protobuf decode recursion limit exceeded");
+    }
+    (reader as any).__tsProtoDecodeDepth = previousRecursionDepth + 1;
+    try {
+      const end = length === undefined ? reader.len : reader.pos + length;
+      const message = createBaseCloneDirResponse();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1: {
+            if (tag !== 8) {
+              break;
+            }
+
+            message.opId = reader.uint64() as bigint;
+            continue;
+          }
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skip(tag & 7);
+      }
+      return message;
+    } finally {
+      (reader as any).__tsProtoDecodeDepth = previousRecursionDepth;
+    }
+  },
+};
+
+function createBaseCloneOptions(): CloneOptions {
+  return { overwrite: false, preserve: [] };
+}
+
+export const CloneOptions: MessageFns<CloneOptions> = {
+  encode(message: CloneOptions, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.overwrite !== false) {
+      writer.uint32(8).bool(message.overwrite);
+    }
+    writer.uint32(18).fork();
+    for (const v of message.preserve) {
+      writer.int32(v);
+    }
+    writer.join();
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CloneOptions {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const previousRecursionDepth = (reader as any).__tsProtoDecodeDepth ?? 0;
+    if (previousRecursionDepth >= 100) {
+      throw new globalThis.Error("protobuf decode recursion limit exceeded");
+    }
+    (reader as any).__tsProtoDecodeDepth = previousRecursionDepth + 1;
+    try {
+      const end = length === undefined ? reader.len : reader.pos + length;
+      const message = createBaseCloneOptions();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1: {
+            if (tag !== 8) {
+              break;
+            }
+
+            message.overwrite = reader.bool();
+            continue;
+          }
+          case 2: {
+            if (tag === 16) {
+              message.preserve.push(reader.int32() as any);
+
+              continue;
+            }
+
+            if (tag === 18) {
+              const end2 = reader.uint32() + reader.pos;
+              while (reader.pos < end2) {
+                message.preserve.push(reader.int32() as any);
+              }
+
+              continue;
+            }
+
+            break;
+          }
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skip(tag & 7);
+      }
+      return message;
+    } finally {
+      (reader as any).__tsProtoDecodeDepth = previousRecursionDepth;
+    }
+  },
+};
+
+function createBaseCloneRequest(): CloneRequest {
+  return { from: "", to: "", options: undefined };
+}
+
+export const CloneRequest: MessageFns<CloneRequest> = {
+  encode(message: CloneRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.from !== "") {
+      writer.uint32(10).string(message.from);
+    }
+    if (message.to !== "") {
+      writer.uint32(18).string(message.to);
+    }
+    if (message.options !== undefined) {
+      CloneOptions.encode(message.options, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CloneRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const previousRecursionDepth = (reader as any).__tsProtoDecodeDepth ?? 0;
+    if (previousRecursionDepth >= 100) {
+      throw new globalThis.Error("protobuf decode recursion limit exceeded");
+    }
+    (reader as any).__tsProtoDecodeDepth = previousRecursionDepth + 1;
+    try {
+      const end = length === undefined ? reader.len : reader.pos + length;
+      const message = createBaseCloneRequest();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1: {
+            if (tag !== 10) {
+              break;
+            }
+
+            message.from = reader.string();
+            continue;
+          }
+          case 2: {
+            if (tag !== 18) {
+              break;
+            }
+
+            message.to = reader.string();
+            continue;
+          }
+          case 3: {
+            if (tag !== 26) {
+              break;
+            }
+
+            message.options = CloneOptions.decode(reader, reader.uint32());
+            continue;
+          }
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skip(tag & 7);
+      }
+      return message;
+    } finally {
+      (reader as any).__tsProtoDecodeDepth = previousRecursionDepth;
+    }
+  },
+};
+
+function createBaseCloneResponse(): CloneResponse {
+  return { outcome: 0 };
+}
+
+export const CloneResponse: MessageFns<CloneResponse> = {
+  encode(message: CloneResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.outcome !== 0) {
+      writer.uint32(8).int32(message.outcome);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CloneResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const previousRecursionDepth = (reader as any).__tsProtoDecodeDepth ?? 0;
+    if (previousRecursionDepth >= 100) {
+      throw new globalThis.Error("protobuf decode recursion limit exceeded");
+    }
+    (reader as any).__tsProtoDecodeDepth = previousRecursionDepth + 1;
+    try {
+      const end = length === undefined ? reader.len : reader.pos + length;
+      const message = createBaseCloneResponse();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1: {
+            if (tag !== 8) {
+              break;
+            }
+
+            message.outcome = reader.int32() as any;
             continue;
           }
         }
@@ -1746,7 +2105,22 @@ export const MkdirRequest: MessageFns<MkdirRequest> = {
 };
 
 function createBaseNotice(): Notice {
-  return { kind: 0, sequence: 0n, refId: 0n, path: "", code: "", message: "", changeKind: 0, oldPath: "" };
+  return {
+    kind: 0,
+    sequence: 0n,
+    refId: 0n,
+    path: "",
+    code: "",
+    message: "",
+    changeKind: 0,
+    oldPath: "",
+    cloned: 0n,
+    overwritten: 0n,
+    skipped: 0n,
+    failed: 0n,
+    removed: 0n,
+    protected: 0n,
+  };
 }
 
 export const Notice: MessageFns<Notice> = {
@@ -1780,6 +2154,42 @@ export const Notice: MessageFns<Notice> = {
     }
     if (message.oldPath !== "") {
       writer.uint32(66).string(message.oldPath);
+    }
+    if (message.cloned !== 0n) {
+      if (BigInt.asUintN(64, message.cloned) !== message.cloned) {
+        throw new globalThis.Error("value provided for field message.cloned of type uint64 too large");
+      }
+      writer.uint32(72).uint64(message.cloned);
+    }
+    if (message.overwritten !== 0n) {
+      if (BigInt.asUintN(64, message.overwritten) !== message.overwritten) {
+        throw new globalThis.Error("value provided for field message.overwritten of type uint64 too large");
+      }
+      writer.uint32(80).uint64(message.overwritten);
+    }
+    if (message.skipped !== 0n) {
+      if (BigInt.asUintN(64, message.skipped) !== message.skipped) {
+        throw new globalThis.Error("value provided for field message.skipped of type uint64 too large");
+      }
+      writer.uint32(88).uint64(message.skipped);
+    }
+    if (message.failed !== 0n) {
+      if (BigInt.asUintN(64, message.failed) !== message.failed) {
+        throw new globalThis.Error("value provided for field message.failed of type uint64 too large");
+      }
+      writer.uint32(96).uint64(message.failed);
+    }
+    if (message.removed !== 0n) {
+      if (BigInt.asUintN(64, message.removed) !== message.removed) {
+        throw new globalThis.Error("value provided for field message.removed of type uint64 too large");
+      }
+      writer.uint32(104).uint64(message.removed);
+    }
+    if (message.protected !== 0n) {
+      if (BigInt.asUintN(64, message.protected) !== message.protected) {
+        throw new globalThis.Error("value provided for field message.protected of type uint64 too large");
+      }
+      writer.uint32(112).uint64(message.protected);
     }
     return writer;
   },
@@ -1859,6 +2269,103 @@ export const Notice: MessageFns<Notice> = {
             }
 
             message.oldPath = reader.string();
+            continue;
+          }
+          case 9: {
+            if (tag !== 72) {
+              break;
+            }
+
+            message.cloned = reader.uint64() as bigint;
+            continue;
+          }
+          case 10: {
+            if (tag !== 80) {
+              break;
+            }
+
+            message.overwritten = reader.uint64() as bigint;
+            continue;
+          }
+          case 11: {
+            if (tag !== 88) {
+              break;
+            }
+
+            message.skipped = reader.uint64() as bigint;
+            continue;
+          }
+          case 12: {
+            if (tag !== 96) {
+              break;
+            }
+
+            message.failed = reader.uint64() as bigint;
+            continue;
+          }
+          case 13: {
+            if (tag !== 104) {
+              break;
+            }
+
+            message.removed = reader.uint64() as bigint;
+            continue;
+          }
+          case 14: {
+            if (tag !== 112) {
+              break;
+            }
+
+            message.protected = reader.uint64() as bigint;
+            continue;
+          }
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skip(tag & 7);
+      }
+      return message;
+    } finally {
+      (reader as any).__tsProtoDecodeDepth = previousRecursionDepth;
+    }
+  },
+};
+
+function createBaseOpCancelRequest(): OpCancelRequest {
+  return { opId: 0n };
+}
+
+export const OpCancelRequest: MessageFns<OpCancelRequest> = {
+  encode(message: OpCancelRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.opId !== 0n) {
+      if (BigInt.asUintN(64, message.opId) !== message.opId) {
+        throw new globalThis.Error("value provided for field message.opId of type uint64 too large");
+      }
+      writer.uint32(8).uint64(message.opId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): OpCancelRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const previousRecursionDepth = (reader as any).__tsProtoDecodeDepth ?? 0;
+    if (previousRecursionDepth >= 100) {
+      throw new globalThis.Error("protobuf decode recursion limit exceeded");
+    }
+    (reader as any).__tsProtoDecodeDepth = previousRecursionDepth + 1;
+    try {
+      const end = length === undefined ? reader.len : reader.pos + length;
+      const message = createBaseOpCancelRequest();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1: {
+            if (tag !== 8) {
+              break;
+            }
+
+            message.opId = reader.uint64() as bigint;
             continue;
           }
         }
@@ -2896,6 +3403,101 @@ export const RemoveAllResponse: MessageFns<RemoveAllResponse> = {
             }
 
             message.removed = reader.uint64() as bigint;
+            continue;
+          }
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skip(tag & 7);
+      }
+      return message;
+    } finally {
+      (reader as any).__tsProtoDecodeDepth = previousRecursionDepth;
+    }
+  },
+};
+
+function createBaseRemoveDirRequest(): RemoveDirRequest {
+  return { path: "" };
+}
+
+export const RemoveDirRequest: MessageFns<RemoveDirRequest> = {
+  encode(message: RemoveDirRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.path !== "") {
+      writer.uint32(10).string(message.path);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RemoveDirRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const previousRecursionDepth = (reader as any).__tsProtoDecodeDepth ?? 0;
+    if (previousRecursionDepth >= 100) {
+      throw new globalThis.Error("protobuf decode recursion limit exceeded");
+    }
+    (reader as any).__tsProtoDecodeDepth = previousRecursionDepth + 1;
+    try {
+      const end = length === undefined ? reader.len : reader.pos + length;
+      const message = createBaseRemoveDirRequest();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1: {
+            if (tag !== 10) {
+              break;
+            }
+
+            message.path = reader.string();
+            continue;
+          }
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skip(tag & 7);
+      }
+      return message;
+    } finally {
+      (reader as any).__tsProtoDecodeDepth = previousRecursionDepth;
+    }
+  },
+};
+
+function createBaseRemoveDirResponse(): RemoveDirResponse {
+  return { opId: 0n };
+}
+
+export const RemoveDirResponse: MessageFns<RemoveDirResponse> = {
+  encode(message: RemoveDirResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.opId !== 0n) {
+      if (BigInt.asUintN(64, message.opId) !== message.opId) {
+        throw new globalThis.Error("value provided for field message.opId of type uint64 too large");
+      }
+      writer.uint32(8).uint64(message.opId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RemoveDirResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const previousRecursionDepth = (reader as any).__tsProtoDecodeDepth ?? 0;
+    if (previousRecursionDepth >= 100) {
+      throw new globalThis.Error("protobuf decode recursion limit exceeded");
+    }
+    (reader as any).__tsProtoDecodeDepth = previousRecursionDepth + 1;
+    try {
+      const end = length === undefined ? reader.len : reader.pos + length;
+      const message = createBaseRemoveDirResponse();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1: {
+            if (tag !== 8) {
+              break;
+            }
+
+            message.opId = reader.uint64() as bigint;
             continue;
           }
         }

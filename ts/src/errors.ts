@@ -8,10 +8,13 @@ export const POSIX_ERRNOS = [
 /** Error returned by the server. `code` is a POSIX name such as ENOENT. */
 export class MountosError extends Error {
   readonly code: string;
+  /** The server's message alone, without the code. Empty when the server sent none. */
+  readonly detail: string;
   constructor(code: string, message: string) {
     super(message ? `${code}: ${message}` : code);
     this.name = "MountosError";
     this.code = code;
+    this.detail = message;
   }
 }
 
@@ -70,5 +73,16 @@ export class ServerRestartedError extends Error {
   constructor() {
     super("server restarted, warm result lost");
     this.name = "ServerRestartedError";
+  }
+}
+
+/**
+ * An operation's end cannot be known, because notices were lost. The server may still run it.
+ * Cancel it or check the result by listing the paths it touched.
+ */
+export class OperationStateUnknownError extends Error {
+  constructor() {
+    super("operation state unknown, notices were lost");
+    this.name = "OperationStateUnknownError";
   }
 }

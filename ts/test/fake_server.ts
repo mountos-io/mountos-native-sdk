@@ -29,6 +29,8 @@ export class FakeServer {
   capabilities: string[] = [];
   readDelayMs = 0;
   helloCount = 0;
+  /** Capabilities the latest Hello asked for. */
+  helloCaps: string[] = [];
   /** instance_id the Hello reply reports. 0n reports none, like an older server. */
   instanceId = 0n;
   readFileCalls = 0;
@@ -52,6 +54,22 @@ export class FakeServer {
   warmHold = false;
   /** Makes WarmOpen and WarmRead fail with EAGAIN. */
   warmQueueFull = false;
+  /** Makes CloneDir and RemoveDir fail with EAGAIN. */
+  opsFull = false;
+  /** Outcome Clone reports. */
+  cloneOutcome: pb.CloneOutcome = pb.CloneOutcome.CLONE_OUTCOME_CLONED;
+  /** When set, Clone fails with this code. */
+  cloneError = "";
+  clones: pb.CloneRequest[] = [];
+  cloneDirs: pb.CloneDirRequest[] = [];
+  removeDirs: string[] = [];
+  cancels: bigint[] = [];
+  /** Requests received for Clone, CloneDir, RemoveDir and OpCancel. */
+  opRequests = 0;
+  /** Notices sent right after each start reply, with ref_id set to the new op id. */
+  eagerOpNotices: Partial<pb.Notice>[] = [];
+  private opsById = new Map<number, { s: net.Socket; ended: boolean }>();
+  private nextOp = 1;
   private warms = new Map<number, { path: string; s: net.Socket; done: boolean }>();
   private nextWarm = 1;
   sockPath: string;
@@ -119,7 +137,8 @@ export class FakeServer {
   /** Pushes a notice frame on any connection at any time. Sequence is filled in when missing. */
   notice(s: net.Socket, n: Partial<pb.Notice>, requestId = 0): void {
     const msg: pb.Notice = {
-      kind: 0, sequence: n.sequence ?? ++this.sequence, refId: 0n, path: "", code: "", message: "", changeKind: 0, oldPath: "", ...n,
+      kind: 0, sequence: n.sequence ?? ++this.sequence, refId: 0n, path: "", code: "", message: "", changeKind: 0, oldPath: "",
+      cloned: 0n, overwritten: 0n, skipped: 0n, failed: 0n, removed: 0n, protected: 0n, ...n,
     };
     this.reply(s, { method: 62, id: requestId, meta: Buffer.alloc(0), payload: Buffer.alloc(0) }, enc(pb.Notice, msg), undefined, false, 8);
   }
@@ -132,6 +151,38 @@ export class FakeServer {
   /** The connection that issued the watch. */
   watchSocket(id: bigint): net.Socket | undefined {
     return this.watches.find((w) => BigInt(w.id) === id)?.s;
+  }
+
+  /** Sends a notice for op id on the connection that started it. An OP_DONE ends the op. */
+  opNotice(id: bigint, n: Partial<pb.Notice>): void {
+    const op = this.opsById.get(Number(id));
+    if (!op) throw new Error(`unknown op id ${id}`);
+    if (n.kind === pb.NoticeKind.NOTICE_KIND_OP_DONE) op.ended = true;
+    this.notice(op.s, { refId: id, ...n });
+  }
+
+  opDone(id: bigint, n: Partial<pb.Notice> = {}): void {
+    this.opNotice(id, { ...n, kind: pb.NoticeKind.NOTICE_KIND_OP_DONE });
+  }
+
+  opFailed(id: bigint, path: string, code: string, message: string): void {
+    this.opNotice(id, { kind: pb.NoticeKind.NOTICE_KIND_OP_FAILED, path, code, message });
+  }
+
+  /** The connection that started op id. */
+  opSocket(id: bigint): net.Socket {
+    return this.opsById.get(Number(id))!.s;
+  }
+
+  private startOp<T extends { opId: bigint }>(s: net.Socket, r: Req, c: Codec<T>): void {
+    if (this.opsFull) return this.fail(s, r, "EAGAIN");
+    const id = this.nextOp++;
+    this.opsById.set(id, { s, ended: false });
+    this.ok(s, r, c, { opId: BigInt(id) } as T);
+    for (const n of this.eagerOpNotices) {
+      const isOverflow = n.kind === pb.NoticeKind.NOTICE_KIND_OVERFLOW && n.refId === undefined;
+      this.notice(s, isOverflow ? n : { ...n, refId: BigInt(id) }, r.id);
+    }
   }
 
   /** Finishes every pending warm. */
@@ -190,6 +241,7 @@ export class FakeServer {
       case 1:
         greet();
         this.helloCount++;
+        this.helloCaps = pb.HelloRequest.decode(r.meta).capabilities;
         return this.ok(s, r, pb.HelloResponse, {
           version: 1, capabilities: this.capabilities, maxPayloadBytes: this.maxPayload, maxInflight: 1,
           instanceId: this.instanceId,
@@ -433,6 +485,28 @@ export class FakeServer {
         return this.startWarm(s, r, pb.WarmOpenRequest.decode(r.meta).path);
       case 71:
         return this.startWarm(s, r, pb.WarmReadRequest.decode(r.meta).path);
+      case 56: {
+        this.opRequests++;
+        this.clones.push(pb.CloneRequest.decode(r.meta));
+        if (this.cloneError) return this.fail(s, r, this.cloneError);
+        return this.ok(s, r, pb.CloneResponse, { outcome: this.cloneOutcome });
+      }
+      case 57:
+        this.opRequests++;
+        this.cloneDirs.push(pb.CloneDirRequest.decode(r.meta));
+        return this.startOp(s, r, pb.CloneDirResponse);
+      case 58:
+        this.opRequests++;
+        this.removeDirs.push(pb.RemoveDirRequest.decode(r.meta).path);
+        return this.startOp(s, r, pb.RemoveDirResponse);
+      case 59: {
+        this.opRequests++;
+        const id = pb.OpCancelRequest.decode(r.meta).opId;
+        const op = this.opsById.get(Number(id));
+        if (!op || op.s !== s || op.ended) return this.fail(s, r, "ENOENT");
+        this.cancels.push(id);
+        return this.reply(s, r, empty);
+      }
       case 55: {
         const p = pb.RemoveAllRequest.decode(r.meta).path;
         let removed = 0;

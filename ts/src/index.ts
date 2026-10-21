@@ -3,6 +3,7 @@ export type { ClientOptions, ReadDirAllOptions, WaitWarmOptions, WalkEntry, Walk
 export {
   DeadlineExceededError,
   MountosError,
+  OperationStateUnknownError,
   POSIX_ERRNOS,
   ProtocolError,
   ServerRestartedError,
@@ -16,4 +17,6 @@ export { socketPath } from "./socketpath.js";
 export { Watch } from "./watch.js";
 export type { WatchOptions } from "./watch.js";
 export type { ReadRange, ReadResult, StatResult, WriteItem, WriteResult } from "./bulk.js";
-export type { ChangeKind, ClientEvent, ClientEventKind, Logger } from "./events.js";
+export type { ChangeKind, ClientEvent, ClientEventKind, Logger, OpCounts } from "./events.js";
+export { MAX_OP_FAILURES, Operation } from "./ops.js";
+export type { CloneOptions, CloneOutcome, OpFailure, OpResult, PreserveKind, WaitOptions } from "./ops.js";

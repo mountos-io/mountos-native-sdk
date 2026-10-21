@@ -23,6 +23,55 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type CloneOutcome int32
+
+const (
+	CloneOutcome_CLONE_OUTCOME_CLONED      CloneOutcome = 0
+	CloneOutcome_CLONE_OUTCOME_OVERWRITTEN CloneOutcome = 1
+	CloneOutcome_CLONE_OUTCOME_SKIPPED     CloneOutcome = 2
+)
+
+// Enum value maps for CloneOutcome.
+var (
+	CloneOutcome_name = map[int32]string{
+		0: "CLONE_OUTCOME_CLONED",
+		1: "CLONE_OUTCOME_OVERWRITTEN",
+		2: "CLONE_OUTCOME_SKIPPED",
+	}
+	CloneOutcome_value = map[string]int32{
+		"CLONE_OUTCOME_CLONED":      0,
+		"CLONE_OUTCOME_OVERWRITTEN": 1,
+		"CLONE_OUTCOME_SKIPPED":     2,
+	}
+)
+
+func (x CloneOutcome) Enum() *CloneOutcome {
+	p := new(CloneOutcome)
+	*p = x
+	return p
+}
+
+func (x CloneOutcome) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CloneOutcome) Descriptor() protoreflect.EnumDescriptor {
+	return file_mountos_fs_proto_enumTypes[0].Descriptor()
+}
+
+func (CloneOutcome) Type() protoreflect.EnumType {
+	return &file_mountos_fs_proto_enumTypes[0]
+}
+
+func (x CloneOutcome) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CloneOutcome.Descriptor instead.
+func (CloneOutcome) EnumDescriptor() ([]byte, []int) {
+	return file_mountos_fs_proto_rawDescGZIP(), []int{0}
+}
+
 type FileType int32
 
 const (
@@ -56,11 +105,11 @@ func (x FileType) String() string {
 }
 
 func (FileType) Descriptor() protoreflect.EnumDescriptor {
-	return file_mountos_fs_proto_enumTypes[0].Descriptor()
+	return file_mountos_fs_proto_enumTypes[1].Descriptor()
 }
 
 func (FileType) Type() protoreflect.EnumType {
-	return &file_mountos_fs_proto_enumTypes[0]
+	return &file_mountos_fs_proto_enumTypes[1]
 }
 
 func (x FileType) Number() protoreflect.EnumNumber {
@@ -69,7 +118,7 @@ func (x FileType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FileType.Descriptor instead.
 func (FileType) EnumDescriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{0}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{1}
 }
 
 type NoticeKind int32
@@ -80,6 +129,8 @@ const (
 	NoticeKind_NOTICE_KIND_CLOSING     NoticeKind = 2
 	NoticeKind_NOTICE_KIND_OVERFLOW    NoticeKind = 3
 	NoticeKind_NOTICE_KIND_CHANGE      NoticeKind = 4
+	NoticeKind_NOTICE_KIND_OP_DONE     NoticeKind = 5
+	NoticeKind_NOTICE_KIND_OP_FAILED   NoticeKind = 6
 )
 
 // Enum value maps for NoticeKind.
@@ -90,6 +141,8 @@ var (
 		2: "NOTICE_KIND_CLOSING",
 		3: "NOTICE_KIND_OVERFLOW",
 		4: "NOTICE_KIND_CHANGE",
+		5: "NOTICE_KIND_OP_DONE",
+		6: "NOTICE_KIND_OP_FAILED",
 	}
 	NoticeKind_value = map[string]int32{
 		"NOTICE_KIND_WARM_DONE":   0,
@@ -97,6 +150,8 @@ var (
 		"NOTICE_KIND_CLOSING":     2,
 		"NOTICE_KIND_OVERFLOW":    3,
 		"NOTICE_KIND_CHANGE":      4,
+		"NOTICE_KIND_OP_DONE":     5,
+		"NOTICE_KIND_OP_FAILED":   6,
 	}
 )
 
@@ -111,11 +166,11 @@ func (x NoticeKind) String() string {
 }
 
 func (NoticeKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_mountos_fs_proto_enumTypes[1].Descriptor()
+	return file_mountos_fs_proto_enumTypes[2].Descriptor()
 }
 
 func (NoticeKind) Type() protoreflect.EnumType {
-	return &file_mountos_fs_proto_enumTypes[1]
+	return &file_mountos_fs_proto_enumTypes[2]
 }
 
 func (x NoticeKind) Number() protoreflect.EnumNumber {
@@ -124,7 +179,7 @@ func (x NoticeKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use NoticeKind.Descriptor instead.
 func (NoticeKind) EnumDescriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{1}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{2}
 }
 
 type OpenFlag int32
@@ -172,11 +227,11 @@ func (x OpenFlag) String() string {
 }
 
 func (OpenFlag) Descriptor() protoreflect.EnumDescriptor {
-	return file_mountos_fs_proto_enumTypes[2].Descriptor()
+	return file_mountos_fs_proto_enumTypes[3].Descriptor()
 }
 
 func (OpenFlag) Type() protoreflect.EnumType {
-	return &file_mountos_fs_proto_enumTypes[2]
+	return &file_mountos_fs_proto_enumTypes[3]
 }
 
 func (x OpenFlag) Number() protoreflect.EnumNumber {
@@ -185,7 +240,56 @@ func (x OpenFlag) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use OpenFlag.Descriptor instead.
 func (OpenFlag) EnumDescriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{2}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{3}
+}
+
+type PreserveKind int32
+
+const (
+	PreserveKind_PRESERVE_KIND_TIMES PreserveKind = 0
+	PreserveKind_PRESERVE_KIND_XATTR PreserveKind = 1
+	PreserveKind_PRESERVE_KIND_ACL   PreserveKind = 2
+)
+
+// Enum value maps for PreserveKind.
+var (
+	PreserveKind_name = map[int32]string{
+		0: "PRESERVE_KIND_TIMES",
+		1: "PRESERVE_KIND_XATTR",
+		2: "PRESERVE_KIND_ACL",
+	}
+	PreserveKind_value = map[string]int32{
+		"PRESERVE_KIND_TIMES": 0,
+		"PRESERVE_KIND_XATTR": 1,
+		"PRESERVE_KIND_ACL":   2,
+	}
+)
+
+func (x PreserveKind) Enum() *PreserveKind {
+	p := new(PreserveKind)
+	*p = x
+	return p
+}
+
+func (x PreserveKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PreserveKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_mountos_fs_proto_enumTypes[4].Descriptor()
+}
+
+func (PreserveKind) Type() protoreflect.EnumType {
+	return &file_mountos_fs_proto_enumTypes[4]
+}
+
+func (x PreserveKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PreserveKind.Descriptor instead.
+func (PreserveKind) EnumDescriptor() ([]byte, []int) {
+	return file_mountos_fs_proto_rawDescGZIP(), []int{4}
 }
 
 type WatchEventKind int32
@@ -230,11 +334,11 @@ func (x WatchEventKind) String() string {
 }
 
 func (WatchEventKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_mountos_fs_proto_enumTypes[3].Descriptor()
+	return file_mountos_fs_proto_enumTypes[5].Descriptor()
 }
 
 func (WatchEventKind) Type() protoreflect.EnumType {
-	return &file_mountos_fs_proto_enumTypes[3]
+	return &file_mountos_fs_proto_enumTypes[5]
 }
 
 func (x WatchEventKind) Number() protoreflect.EnumNumber {
@@ -243,7 +347,7 @@ func (x WatchEventKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use WatchEventKind.Descriptor instead.
 func (WatchEventKind) EnumDescriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{3}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{5}
 }
 
 type Whence int32
@@ -279,11 +383,11 @@ func (x Whence) String() string {
 }
 
 func (Whence) Descriptor() protoreflect.EnumDescriptor {
-	return file_mountos_fs_proto_enumTypes[4].Descriptor()
+	return file_mountos_fs_proto_enumTypes[6].Descriptor()
 }
 
 func (Whence) Type() protoreflect.EnumType {
-	return &file_mountos_fs_proto_enumTypes[4]
+	return &file_mountos_fs_proto_enumTypes[6]
 }
 
 func (x Whence) Number() protoreflect.EnumNumber {
@@ -292,7 +396,7 @@ func (x Whence) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Whence.Descriptor instead.
 func (Whence) EnumDescriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{4}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{6}
 }
 
 type AccessRequest struct {
@@ -459,6 +563,266 @@ func (x *ChmodRequest) GetMode() uint32 {
 	return 0
 }
 
+type CloneDirRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	From          string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
+	To            string                 `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
+	Options       *CloneOptions          `protobuf:"bytes,3,opt,name=options,proto3" json:"options,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloneDirRequest) Reset() {
+	*x = CloneDirRequest{}
+	mi := &file_mountos_fs_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloneDirRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloneDirRequest) ProtoMessage() {}
+
+func (x *CloneDirRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mountos_fs_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloneDirRequest.ProtoReflect.Descriptor instead.
+func (*CloneDirRequest) Descriptor() ([]byte, []int) {
+	return file_mountos_fs_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *CloneDirRequest) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *CloneDirRequest) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+func (x *CloneDirRequest) GetOptions() *CloneOptions {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+type CloneDirResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OpId          uint64                 `protobuf:"varint,1,opt,name=op_id,json=opId,proto3" json:"op_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloneDirResponse) Reset() {
+	*x = CloneDirResponse{}
+	mi := &file_mountos_fs_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloneDirResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloneDirResponse) ProtoMessage() {}
+
+func (x *CloneDirResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_mountos_fs_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloneDirResponse.ProtoReflect.Descriptor instead.
+func (*CloneDirResponse) Descriptor() ([]byte, []int) {
+	return file_mountos_fs_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CloneDirResponse) GetOpId() uint64 {
+	if x != nil {
+		return x.OpId
+	}
+	return 0
+}
+
+type CloneOptions struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Overwrite     bool                   `protobuf:"varint,1,opt,name=overwrite,proto3" json:"overwrite,omitempty"`
+	Preserve      []PreserveKind         `protobuf:"varint,2,rep,packed,name=preserve,proto3,enum=mountos.filesystem.v1.PreserveKind" json:"preserve,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloneOptions) Reset() {
+	*x = CloneOptions{}
+	mi := &file_mountos_fs_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloneOptions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloneOptions) ProtoMessage() {}
+
+func (x *CloneOptions) ProtoReflect() protoreflect.Message {
+	mi := &file_mountos_fs_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloneOptions.ProtoReflect.Descriptor instead.
+func (*CloneOptions) Descriptor() ([]byte, []int) {
+	return file_mountos_fs_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CloneOptions) GetOverwrite() bool {
+	if x != nil {
+		return x.Overwrite
+	}
+	return false
+}
+
+func (x *CloneOptions) GetPreserve() []PreserveKind {
+	if x != nil {
+		return x.Preserve
+	}
+	return nil
+}
+
+type CloneRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	From          string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
+	To            string                 `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
+	Options       *CloneOptions          `protobuf:"bytes,3,opt,name=options,proto3" json:"options,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloneRequest) Reset() {
+	*x = CloneRequest{}
+	mi := &file_mountos_fs_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloneRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloneRequest) ProtoMessage() {}
+
+func (x *CloneRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mountos_fs_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloneRequest.ProtoReflect.Descriptor instead.
+func (*CloneRequest) Descriptor() ([]byte, []int) {
+	return file_mountos_fs_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *CloneRequest) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *CloneRequest) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+func (x *CloneRequest) GetOptions() *CloneOptions {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+type CloneResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Outcome       CloneOutcome           `protobuf:"varint,1,opt,name=outcome,proto3,enum=mountos.filesystem.v1.CloneOutcome" json:"outcome,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloneResponse) Reset() {
+	*x = CloneResponse{}
+	mi := &file_mountos_fs_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloneResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloneResponse) ProtoMessage() {}
+
+func (x *CloneResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_mountos_fs_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloneResponse.ProtoReflect.Descriptor instead.
+func (*CloneResponse) Descriptor() ([]byte, []int) {
+	return file_mountos_fs_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *CloneResponse) GetOutcome() CloneOutcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return CloneOutcome_CLONE_OUTCOME_CLONED
+}
+
 type CloseRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Handle        uint64                 `protobuf:"varint,1,opt,name=handle,proto3" json:"handle,omitempty"`
@@ -468,7 +832,7 @@ type CloseRequest struct {
 
 func (x *CloseRequest) Reset() {
 	*x = CloseRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[3]
+	mi := &file_mountos_fs_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -480,7 +844,7 @@ func (x *CloseRequest) String() string {
 func (*CloseRequest) ProtoMessage() {}
 
 func (x *CloseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[3]
+	mi := &file_mountos_fs_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -493,7 +857,7 @@ func (x *CloseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseRequest.ProtoReflect.Descriptor instead.
 func (*CloseRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{3}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CloseRequest) GetHandle() uint64 {
@@ -512,7 +876,7 @@ type ClosedirRequest struct {
 
 func (x *ClosedirRequest) Reset() {
 	*x = ClosedirRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[4]
+	mi := &file_mountos_fs_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -524,7 +888,7 @@ func (x *ClosedirRequest) String() string {
 func (*ClosedirRequest) ProtoMessage() {}
 
 func (x *ClosedirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[4]
+	mi := &file_mountos_fs_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -537,7 +901,7 @@ func (x *ClosedirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClosedirRequest.ProtoReflect.Descriptor instead.
 func (*ClosedirRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{4}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ClosedirRequest) GetHandle() uint64 {
@@ -558,7 +922,7 @@ type DirEntry struct {
 
 func (x *DirEntry) Reset() {
 	*x = DirEntry{}
-	mi := &file_mountos_fs_proto_msgTypes[5]
+	mi := &file_mountos_fs_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -570,7 +934,7 @@ func (x *DirEntry) String() string {
 func (*DirEntry) ProtoMessage() {}
 
 func (x *DirEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[5]
+	mi := &file_mountos_fs_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -583,7 +947,7 @@ func (x *DirEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DirEntry.ProtoReflect.Descriptor instead.
 func (*DirEntry) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{5}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DirEntry) GetName() string {
@@ -615,7 +979,7 @@ type Empty struct {
 
 func (x *Empty) Reset() {
 	*x = Empty{}
-	mi := &file_mountos_fs_proto_msgTypes[6]
+	mi := &file_mountos_fs_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -627,7 +991,7 @@ func (x *Empty) String() string {
 func (*Empty) ProtoMessage() {}
 
 func (x *Empty) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[6]
+	mi := &file_mountos_fs_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -640,7 +1004,7 @@ func (x *Empty) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Empty.ProtoReflect.Descriptor instead.
 func (*Empty) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{6}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{11}
 }
 
 type FileInfo struct {
@@ -662,7 +1026,7 @@ type FileInfo struct {
 
 func (x *FileInfo) Reset() {
 	*x = FileInfo{}
-	mi := &file_mountos_fs_proto_msgTypes[7]
+	mi := &file_mountos_fs_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -674,7 +1038,7 @@ func (x *FileInfo) String() string {
 func (*FileInfo) ProtoMessage() {}
 
 func (x *FileInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[7]
+	mi := &file_mountos_fs_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -687,7 +1051,7 @@ func (x *FileInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileInfo.ProtoReflect.Descriptor instead.
 func (*FileInfo) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{7}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *FileInfo) GetName() string {
@@ -776,7 +1140,7 @@ type FlushRequest struct {
 
 func (x *FlushRequest) Reset() {
 	*x = FlushRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[8]
+	mi := &file_mountos_fs_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -788,7 +1152,7 @@ func (x *FlushRequest) String() string {
 func (*FlushRequest) ProtoMessage() {}
 
 func (x *FlushRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[8]
+	mi := &file_mountos_fs_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -801,7 +1165,7 @@ func (x *FlushRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FlushRequest.ProtoReflect.Descriptor instead.
 func (*FlushRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{8}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *FlushRequest) GetHandle() uint64 {
@@ -820,7 +1184,7 @@ type FstatRequest struct {
 
 func (x *FstatRequest) Reset() {
 	*x = FstatRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[9]
+	mi := &file_mountos_fs_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -832,7 +1196,7 @@ func (x *FstatRequest) String() string {
 func (*FstatRequest) ProtoMessage() {}
 
 func (x *FstatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[9]
+	mi := &file_mountos_fs_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -845,7 +1209,7 @@ func (x *FstatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FstatRequest.ProtoReflect.Descriptor instead.
 func (*FstatRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{9}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *FstatRequest) GetHandle() uint64 {
@@ -864,7 +1228,7 @@ type FstatResponse struct {
 
 func (x *FstatResponse) Reset() {
 	*x = FstatResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[10]
+	mi := &file_mountos_fs_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -876,7 +1240,7 @@ func (x *FstatResponse) String() string {
 func (*FstatResponse) ProtoMessage() {}
 
 func (x *FstatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[10]
+	mi := &file_mountos_fs_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -889,7 +1253,7 @@ func (x *FstatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FstatResponse.ProtoReflect.Descriptor instead.
 func (*FstatResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{10}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *FstatResponse) GetInfo() *FileInfo {
@@ -909,7 +1273,7 @@ type FsyncRequest struct {
 
 func (x *FsyncRequest) Reset() {
 	*x = FsyncRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[11]
+	mi := &file_mountos_fs_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -921,7 +1285,7 @@ func (x *FsyncRequest) String() string {
 func (*FsyncRequest) ProtoMessage() {}
 
 func (x *FsyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[11]
+	mi := &file_mountos_fs_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -934,7 +1298,7 @@ func (x *FsyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FsyncRequest.ProtoReflect.Descriptor instead.
 func (*FsyncRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{11}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *FsyncRequest) GetHandle() uint64 {
@@ -961,7 +1325,7 @@ type FtruncateRequest struct {
 
 func (x *FtruncateRequest) Reset() {
 	*x = FtruncateRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[12]
+	mi := &file_mountos_fs_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -973,7 +1337,7 @@ func (x *FtruncateRequest) String() string {
 func (*FtruncateRequest) ProtoMessage() {}
 
 func (x *FtruncateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[12]
+	mi := &file_mountos_fs_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -986,7 +1350,7 @@ func (x *FtruncateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FtruncateRequest.ProtoReflect.Descriptor instead.
 func (*FtruncateRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{12}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *FtruncateRequest) GetHandle() uint64 {
@@ -1015,7 +1379,7 @@ type HelloRequest struct {
 
 func (x *HelloRequest) Reset() {
 	*x = HelloRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[13]
+	mi := &file_mountos_fs_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1027,7 +1391,7 @@ func (x *HelloRequest) String() string {
 func (*HelloRequest) ProtoMessage() {}
 
 func (x *HelloRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[13]
+	mi := &file_mountos_fs_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1040,7 +1404,7 @@ func (x *HelloRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelloRequest.ProtoReflect.Descriptor instead.
 func (*HelloRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{13}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *HelloRequest) GetClientName() string {
@@ -1084,7 +1448,7 @@ type HelloResponse struct {
 
 func (x *HelloResponse) Reset() {
 	*x = HelloResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[14]
+	mi := &file_mountos_fs_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1096,7 +1460,7 @@ func (x *HelloResponse) String() string {
 func (*HelloResponse) ProtoMessage() {}
 
 func (x *HelloResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[14]
+	mi := &file_mountos_fs_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1109,7 +1473,7 @@ func (x *HelloResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelloResponse.ProtoReflect.Descriptor instead.
 func (*HelloResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{14}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *HelloResponse) GetVersion() uint32 {
@@ -1157,7 +1521,7 @@ type LinkRequest struct {
 
 func (x *LinkRequest) Reset() {
 	*x = LinkRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[15]
+	mi := &file_mountos_fs_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1169,7 +1533,7 @@ func (x *LinkRequest) String() string {
 func (*LinkRequest) ProtoMessage() {}
 
 func (x *LinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[15]
+	mi := &file_mountos_fs_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1182,7 +1546,7 @@ func (x *LinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkRequest.ProtoReflect.Descriptor instead.
 func (*LinkRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{15}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *LinkRequest) GetExisting() string {
@@ -1210,7 +1574,7 @@ type LsRequest struct {
 
 func (x *LsRequest) Reset() {
 	*x = LsRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[16]
+	mi := &file_mountos_fs_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1222,7 +1586,7 @@ func (x *LsRequest) String() string {
 func (*LsRequest) ProtoMessage() {}
 
 func (x *LsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[16]
+	mi := &file_mountos_fs_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1235,7 +1599,7 @@ func (x *LsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LsRequest.ProtoReflect.Descriptor instead.
 func (*LsRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{16}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *LsRequest) GetPath() string {
@@ -1269,7 +1633,7 @@ type LsResponse struct {
 
 func (x *LsResponse) Reset() {
 	*x = LsResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[17]
+	mi := &file_mountos_fs_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1281,7 +1645,7 @@ func (x *LsResponse) String() string {
 func (*LsResponse) ProtoMessage() {}
 
 func (x *LsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[17]
+	mi := &file_mountos_fs_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1294,7 +1658,7 @@ func (x *LsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LsResponse.ProtoReflect.Descriptor instead.
 func (*LsResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{17}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *LsResponse) GetEntries() []*DirEntry {
@@ -1320,7 +1684,7 @@ type LstatRequest struct {
 
 func (x *LstatRequest) Reset() {
 	*x = LstatRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[18]
+	mi := &file_mountos_fs_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1332,7 +1696,7 @@ func (x *LstatRequest) String() string {
 func (*LstatRequest) ProtoMessage() {}
 
 func (x *LstatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[18]
+	mi := &file_mountos_fs_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1345,7 +1709,7 @@ func (x *LstatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LstatRequest.ProtoReflect.Descriptor instead.
 func (*LstatRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{18}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *LstatRequest) GetPath() string {
@@ -1364,7 +1728,7 @@ type LstatResponse struct {
 
 func (x *LstatResponse) Reset() {
 	*x = LstatResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[19]
+	mi := &file_mountos_fs_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1376,7 +1740,7 @@ func (x *LstatResponse) String() string {
 func (*LstatResponse) ProtoMessage() {}
 
 func (x *LstatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[19]
+	mi := &file_mountos_fs_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1389,7 +1753,7 @@ func (x *LstatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LstatResponse.ProtoReflect.Descriptor instead.
 func (*LstatResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{19}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *LstatResponse) GetInfo() *FileInfo {
@@ -1409,7 +1773,7 @@ type MkdirRequest struct {
 
 func (x *MkdirRequest) Reset() {
 	*x = MkdirRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[20]
+	mi := &file_mountos_fs_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1421,7 +1785,7 @@ func (x *MkdirRequest) String() string {
 func (*MkdirRequest) ProtoMessage() {}
 
 func (x *MkdirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[20]
+	mi := &file_mountos_fs_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1434,7 +1798,7 @@ func (x *MkdirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MkdirRequest.ProtoReflect.Descriptor instead.
 func (*MkdirRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{20}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *MkdirRequest) GetPath() string {
@@ -1461,13 +1825,19 @@ type Notice struct {
 	Message       string                 `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`
 	ChangeKind    WatchEventKind         `protobuf:"varint,7,opt,name=change_kind,json=changeKind,proto3,enum=mountos.filesystem.v1.WatchEventKind" json:"change_kind,omitempty"`
 	OldPath       string                 `protobuf:"bytes,8,opt,name=old_path,json=oldPath,proto3" json:"old_path,omitempty"`
+	Cloned        uint64                 `protobuf:"varint,9,opt,name=cloned,proto3" json:"cloned,omitempty"`
+	Overwritten   uint64                 `protobuf:"varint,10,opt,name=overwritten,proto3" json:"overwritten,omitempty"`
+	Skipped       uint64                 `protobuf:"varint,11,opt,name=skipped,proto3" json:"skipped,omitempty"`
+	Failed        uint64                 `protobuf:"varint,12,opt,name=failed,proto3" json:"failed,omitempty"`
+	Removed       uint64                 `protobuf:"varint,13,opt,name=removed,proto3" json:"removed,omitempty"`
+	Protected     uint64                 `protobuf:"varint,14,opt,name=protected,proto3" json:"protected,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Notice) Reset() {
 	*x = Notice{}
-	mi := &file_mountos_fs_proto_msgTypes[21]
+	mi := &file_mountos_fs_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1479,7 +1849,7 @@ func (x *Notice) String() string {
 func (*Notice) ProtoMessage() {}
 
 func (x *Notice) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[21]
+	mi := &file_mountos_fs_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1492,7 +1862,7 @@ func (x *Notice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Notice.ProtoReflect.Descriptor instead.
 func (*Notice) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{21}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *Notice) GetKind() NoticeKind {
@@ -1551,6 +1921,92 @@ func (x *Notice) GetOldPath() string {
 	return ""
 }
 
+func (x *Notice) GetCloned() uint64 {
+	if x != nil {
+		return x.Cloned
+	}
+	return 0
+}
+
+func (x *Notice) GetOverwritten() uint64 {
+	if x != nil {
+		return x.Overwritten
+	}
+	return 0
+}
+
+func (x *Notice) GetSkipped() uint64 {
+	if x != nil {
+		return x.Skipped
+	}
+	return 0
+}
+
+func (x *Notice) GetFailed() uint64 {
+	if x != nil {
+		return x.Failed
+	}
+	return 0
+}
+
+func (x *Notice) GetRemoved() uint64 {
+	if x != nil {
+		return x.Removed
+	}
+	return 0
+}
+
+func (x *Notice) GetProtected() uint64 {
+	if x != nil {
+		return x.Protected
+	}
+	return 0
+}
+
+type OpCancelRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OpId          uint64                 `protobuf:"varint,1,opt,name=op_id,json=opId,proto3" json:"op_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpCancelRequest) Reset() {
+	*x = OpCancelRequest{}
+	mi := &file_mountos_fs_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpCancelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpCancelRequest) ProtoMessage() {}
+
+func (x *OpCancelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mountos_fs_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpCancelRequest.ProtoReflect.Descriptor instead.
+func (*OpCancelRequest) Descriptor() ([]byte, []int) {
+	return file_mountos_fs_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *OpCancelRequest) GetOpId() uint64 {
+	if x != nil {
+		return x.OpId
+	}
+	return 0
+}
+
 type OpenRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
@@ -1562,7 +2018,7 @@ type OpenRequest struct {
 
 func (x *OpenRequest) Reset() {
 	*x = OpenRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[22]
+	mi := &file_mountos_fs_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1574,7 +2030,7 @@ func (x *OpenRequest) String() string {
 func (*OpenRequest) ProtoMessage() {}
 
 func (x *OpenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[22]
+	mi := &file_mountos_fs_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1587,7 +2043,7 @@ func (x *OpenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenRequest.ProtoReflect.Descriptor instead.
 func (*OpenRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{22}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *OpenRequest) GetPath() string {
@@ -1620,7 +2076,7 @@ type OpenResponse struct {
 
 func (x *OpenResponse) Reset() {
 	*x = OpenResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[23]
+	mi := &file_mountos_fs_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1632,7 +2088,7 @@ func (x *OpenResponse) String() string {
 func (*OpenResponse) ProtoMessage() {}
 
 func (x *OpenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[23]
+	mi := &file_mountos_fs_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1645,7 +2101,7 @@ func (x *OpenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenResponse.ProtoReflect.Descriptor instead.
 func (*OpenResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{23}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *OpenResponse) GetHandle() uint64 {
@@ -1664,7 +2120,7 @@ type OpendirRequest struct {
 
 func (x *OpendirRequest) Reset() {
 	*x = OpendirRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[24]
+	mi := &file_mountos_fs_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1676,7 +2132,7 @@ func (x *OpendirRequest) String() string {
 func (*OpendirRequest) ProtoMessage() {}
 
 func (x *OpendirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[24]
+	mi := &file_mountos_fs_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1689,7 +2145,7 @@ func (x *OpendirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpendirRequest.ProtoReflect.Descriptor instead.
 func (*OpendirRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{24}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *OpendirRequest) GetPath() string {
@@ -1708,7 +2164,7 @@ type OpendirResponse struct {
 
 func (x *OpendirResponse) Reset() {
 	*x = OpendirResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[25]
+	mi := &file_mountos_fs_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1720,7 +2176,7 @@ func (x *OpendirResponse) String() string {
 func (*OpendirResponse) ProtoMessage() {}
 
 func (x *OpendirResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[25]
+	mi := &file_mountos_fs_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1733,7 +2189,7 @@ func (x *OpendirResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpendirResponse.ProtoReflect.Descriptor instead.
 func (*OpendirResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{25}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *OpendirResponse) GetHandle() uint64 {
@@ -1753,7 +2209,7 @@ type Range struct {
 
 func (x *Range) Reset() {
 	*x = Range{}
-	mi := &file_mountos_fs_proto_msgTypes[26]
+	mi := &file_mountos_fs_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1765,7 +2221,7 @@ func (x *Range) String() string {
 func (*Range) ProtoMessage() {}
 
 func (x *Range) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[26]
+	mi := &file_mountos_fs_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1778,7 +2234,7 @@ func (x *Range) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Range.ProtoReflect.Descriptor instead.
 func (*Range) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{26}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *Range) GetOffset() int64 {
@@ -1806,7 +2262,7 @@ type ReadAtRequest struct {
 
 func (x *ReadAtRequest) Reset() {
 	*x = ReadAtRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[27]
+	mi := &file_mountos_fs_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1818,7 +2274,7 @@ func (x *ReadAtRequest) String() string {
 func (*ReadAtRequest) ProtoMessage() {}
 
 func (x *ReadAtRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[27]
+	mi := &file_mountos_fs_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1831,7 +2287,7 @@ func (x *ReadAtRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadAtRequest.ProtoReflect.Descriptor instead.
 func (*ReadAtRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{27}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ReadAtRequest) GetHandle() uint64 {
@@ -1864,7 +2320,7 @@ type ReadAtResponse struct {
 
 func (x *ReadAtResponse) Reset() {
 	*x = ReadAtResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[28]
+	mi := &file_mountos_fs_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1876,7 +2332,7 @@ func (x *ReadAtResponse) String() string {
 func (*ReadAtResponse) ProtoMessage() {}
 
 func (x *ReadAtResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[28]
+	mi := &file_mountos_fs_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1889,7 +2345,7 @@ func (x *ReadAtResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadAtResponse.ProtoReflect.Descriptor instead.
 func (*ReadAtResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{28}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ReadAtResponse) GetCount() uint32 {
@@ -1909,7 +2365,7 @@ type ReadBatchRequest struct {
 
 func (x *ReadBatchRequest) Reset() {
 	*x = ReadBatchRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[29]
+	mi := &file_mountos_fs_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1921,7 +2377,7 @@ func (x *ReadBatchRequest) String() string {
 func (*ReadBatchRequest) ProtoMessage() {}
 
 func (x *ReadBatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[29]
+	mi := &file_mountos_fs_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1934,7 +2390,7 @@ func (x *ReadBatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadBatchRequest.ProtoReflect.Descriptor instead.
 func (*ReadBatchRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{29}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ReadBatchRequest) GetHandle() uint64 {
@@ -1961,7 +2417,7 @@ type ReadBatchResponse struct {
 
 func (x *ReadBatchResponse) Reset() {
 	*x = ReadBatchResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[30]
+	mi := &file_mountos_fs_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1973,7 +2429,7 @@ func (x *ReadBatchResponse) String() string {
 func (*ReadBatchResponse) ProtoMessage() {}
 
 func (x *ReadBatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[30]
+	mi := &file_mountos_fs_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1986,7 +2442,7 @@ func (x *ReadBatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadBatchResponse.ProtoReflect.Descriptor instead.
 func (*ReadBatchResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{30}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ReadBatchResponse) GetCounts() []uint32 {
@@ -2013,7 +2469,7 @@ type ReadFileRequest struct {
 
 func (x *ReadFileRequest) Reset() {
 	*x = ReadFileRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[31]
+	mi := &file_mountos_fs_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2025,7 +2481,7 @@ func (x *ReadFileRequest) String() string {
 func (*ReadFileRequest) ProtoMessage() {}
 
 func (x *ReadFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[31]
+	mi := &file_mountos_fs_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2038,7 +2494,7 @@ func (x *ReadFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadFileRequest.ProtoReflect.Descriptor instead.
 func (*ReadFileRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{31}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ReadFileRequest) GetPath() string {
@@ -2064,7 +2520,7 @@ type ReadFileResponse struct {
 
 func (x *ReadFileResponse) Reset() {
 	*x = ReadFileResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[32]
+	mi := &file_mountos_fs_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2076,7 +2532,7 @@ func (x *ReadFileResponse) String() string {
 func (*ReadFileResponse) ProtoMessage() {}
 
 func (x *ReadFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[32]
+	mi := &file_mountos_fs_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2089,7 +2545,7 @@ func (x *ReadFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadFileResponse.ProtoReflect.Descriptor instead.
 func (*ReadFileResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{32}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ReadFileResponse) GetCount() uint32 {
@@ -2109,7 +2565,7 @@ type ReadRequest struct {
 
 func (x *ReadRequest) Reset() {
 	*x = ReadRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[33]
+	mi := &file_mountos_fs_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2121,7 +2577,7 @@ func (x *ReadRequest) String() string {
 func (*ReadRequest) ProtoMessage() {}
 
 func (x *ReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[33]
+	mi := &file_mountos_fs_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2134,7 +2590,7 @@ func (x *ReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadRequest.ProtoReflect.Descriptor instead.
 func (*ReadRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{33}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ReadRequest) GetHandle() uint64 {
@@ -2160,7 +2616,7 @@ type ReadResponse struct {
 
 func (x *ReadResponse) Reset() {
 	*x = ReadResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[34]
+	mi := &file_mountos_fs_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2172,7 +2628,7 @@ func (x *ReadResponse) String() string {
 func (*ReadResponse) ProtoMessage() {}
 
 func (x *ReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[34]
+	mi := &file_mountos_fs_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2185,7 +2641,7 @@ func (x *ReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadResponse.ProtoReflect.Descriptor instead.
 func (*ReadResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{34}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ReadResponse) GetCount() uint32 {
@@ -2205,7 +2661,7 @@ type ReaddirRequest struct {
 
 func (x *ReaddirRequest) Reset() {
 	*x = ReaddirRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[35]
+	mi := &file_mountos_fs_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2217,7 +2673,7 @@ func (x *ReaddirRequest) String() string {
 func (*ReaddirRequest) ProtoMessage() {}
 
 func (x *ReaddirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[35]
+	mi := &file_mountos_fs_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2230,7 +2686,7 @@ func (x *ReaddirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReaddirRequest.ProtoReflect.Descriptor instead.
 func (*ReaddirRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{35}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ReaddirRequest) GetHandle() uint64 {
@@ -2257,7 +2713,7 @@ type ReaddirResponse struct {
 
 func (x *ReaddirResponse) Reset() {
 	*x = ReaddirResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[36]
+	mi := &file_mountos_fs_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2269,7 +2725,7 @@ func (x *ReaddirResponse) String() string {
 func (*ReaddirResponse) ProtoMessage() {}
 
 func (x *ReaddirResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[36]
+	mi := &file_mountos_fs_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2282,7 +2738,7 @@ func (x *ReaddirResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReaddirResponse.ProtoReflect.Descriptor instead.
 func (*ReaddirResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{36}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ReaddirResponse) GetEntries() []*DirEntry {
@@ -2308,7 +2764,7 @@ type ReadlinkRequest struct {
 
 func (x *ReadlinkRequest) Reset() {
 	*x = ReadlinkRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[37]
+	mi := &file_mountos_fs_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2320,7 +2776,7 @@ func (x *ReadlinkRequest) String() string {
 func (*ReadlinkRequest) ProtoMessage() {}
 
 func (x *ReadlinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[37]
+	mi := &file_mountos_fs_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2333,7 +2789,7 @@ func (x *ReadlinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadlinkRequest.ProtoReflect.Descriptor instead.
 func (*ReadlinkRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{37}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ReadlinkRequest) GetPath() string {
@@ -2352,7 +2808,7 @@ type ReadlinkResponse struct {
 
 func (x *ReadlinkResponse) Reset() {
 	*x = ReadlinkResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[38]
+	mi := &file_mountos_fs_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2364,7 +2820,7 @@ func (x *ReadlinkResponse) String() string {
 func (*ReadlinkResponse) ProtoMessage() {}
 
 func (x *ReadlinkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[38]
+	mi := &file_mountos_fs_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2377,7 +2833,7 @@ func (x *ReadlinkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadlinkResponse.ProtoReflect.Descriptor instead.
 func (*ReadlinkResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{38}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ReadlinkResponse) GetTarget() string {
@@ -2396,7 +2852,7 @@ type RemoveAllRequest struct {
 
 func (x *RemoveAllRequest) Reset() {
 	*x = RemoveAllRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[39]
+	mi := &file_mountos_fs_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2408,7 +2864,7 @@ func (x *RemoveAllRequest) String() string {
 func (*RemoveAllRequest) ProtoMessage() {}
 
 func (x *RemoveAllRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[39]
+	mi := &file_mountos_fs_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2421,7 +2877,7 @@ func (x *RemoveAllRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveAllRequest.ProtoReflect.Descriptor instead.
 func (*RemoveAllRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{39}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *RemoveAllRequest) GetPath() string {
@@ -2440,7 +2896,7 @@ type RemoveAllResponse struct {
 
 func (x *RemoveAllResponse) Reset() {
 	*x = RemoveAllResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[40]
+	mi := &file_mountos_fs_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2452,7 +2908,7 @@ func (x *RemoveAllResponse) String() string {
 func (*RemoveAllResponse) ProtoMessage() {}
 
 func (x *RemoveAllResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[40]
+	mi := &file_mountos_fs_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2465,12 +2921,100 @@ func (x *RemoveAllResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveAllResponse.ProtoReflect.Descriptor instead.
 func (*RemoveAllResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{40}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *RemoveAllResponse) GetRemoved() uint64 {
 	if x != nil {
 		return x.Removed
+	}
+	return 0
+}
+
+type RemoveDirRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveDirRequest) Reset() {
+	*x = RemoveDirRequest{}
+	mi := &file_mountos_fs_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveDirRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveDirRequest) ProtoMessage() {}
+
+func (x *RemoveDirRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mountos_fs_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveDirRequest.ProtoReflect.Descriptor instead.
+func (*RemoveDirRequest) Descriptor() ([]byte, []int) {
+	return file_mountos_fs_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *RemoveDirRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+type RemoveDirResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OpId          uint64                 `protobuf:"varint,1,opt,name=op_id,json=opId,proto3" json:"op_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveDirResponse) Reset() {
+	*x = RemoveDirResponse{}
+	mi := &file_mountos_fs_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveDirResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveDirResponse) ProtoMessage() {}
+
+func (x *RemoveDirResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_mountos_fs_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveDirResponse.ProtoReflect.Descriptor instead.
+func (*RemoveDirResponse) Descriptor() ([]byte, []int) {
+	return file_mountos_fs_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *RemoveDirResponse) GetOpId() uint64 {
+	if x != nil {
+		return x.OpId
 	}
 	return 0
 }
@@ -2485,7 +3029,7 @@ type RenameRequest struct {
 
 func (x *RenameRequest) Reset() {
 	*x = RenameRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[41]
+	mi := &file_mountos_fs_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2497,7 +3041,7 @@ func (x *RenameRequest) String() string {
 func (*RenameRequest) ProtoMessage() {}
 
 func (x *RenameRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[41]
+	mi := &file_mountos_fs_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2510,7 +3054,7 @@ func (x *RenameRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenameRequest.ProtoReflect.Descriptor instead.
 func (*RenameRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{41}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *RenameRequest) GetFrom() string {
@@ -2536,7 +3080,7 @@ type RmdirRequest struct {
 
 func (x *RmdirRequest) Reset() {
 	*x = RmdirRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[42]
+	mi := &file_mountos_fs_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2548,7 +3092,7 @@ func (x *RmdirRequest) String() string {
 func (*RmdirRequest) ProtoMessage() {}
 
 func (x *RmdirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[42]
+	mi := &file_mountos_fs_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2561,7 +3105,7 @@ func (x *RmdirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RmdirRequest.ProtoReflect.Descriptor instead.
 func (*RmdirRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{42}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *RmdirRequest) GetPath() string {
@@ -2582,7 +3126,7 @@ type SeekRequest struct {
 
 func (x *SeekRequest) Reset() {
 	*x = SeekRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[43]
+	mi := &file_mountos_fs_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2594,7 +3138,7 @@ func (x *SeekRequest) String() string {
 func (*SeekRequest) ProtoMessage() {}
 
 func (x *SeekRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[43]
+	mi := &file_mountos_fs_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2607,7 +3151,7 @@ func (x *SeekRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SeekRequest.ProtoReflect.Descriptor instead.
 func (*SeekRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{43}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *SeekRequest) GetHandle() uint64 {
@@ -2640,7 +3184,7 @@ type SeekResponse struct {
 
 func (x *SeekResponse) Reset() {
 	*x = SeekResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[44]
+	mi := &file_mountos_fs_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2652,7 +3196,7 @@ func (x *SeekResponse) String() string {
 func (*SeekResponse) ProtoMessage() {}
 
 func (x *SeekResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[44]
+	mi := &file_mountos_fs_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2665,7 +3209,7 @@ func (x *SeekResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SeekResponse.ProtoReflect.Descriptor instead.
 func (*SeekResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{44}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *SeekResponse) GetOffset() int64 {
@@ -2684,7 +3228,7 @@ type StatBatchRequest struct {
 
 func (x *StatBatchRequest) Reset() {
 	*x = StatBatchRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[45]
+	mi := &file_mountos_fs_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2696,7 +3240,7 @@ func (x *StatBatchRequest) String() string {
 func (*StatBatchRequest) ProtoMessage() {}
 
 func (x *StatBatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[45]
+	mi := &file_mountos_fs_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2709,7 +3253,7 @@ func (x *StatBatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatBatchRequest.ProtoReflect.Descriptor instead.
 func (*StatBatchRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{45}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *StatBatchRequest) GetPaths() []string {
@@ -2729,7 +3273,7 @@ type StatBatchResponse struct {
 
 func (x *StatBatchResponse) Reset() {
 	*x = StatBatchResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[46]
+	mi := &file_mountos_fs_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2741,7 +3285,7 @@ func (x *StatBatchResponse) String() string {
 func (*StatBatchResponse) ProtoMessage() {}
 
 func (x *StatBatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[46]
+	mi := &file_mountos_fs_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2754,7 +3298,7 @@ func (x *StatBatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatBatchResponse.ProtoReflect.Descriptor instead.
 func (*StatBatchResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{46}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *StatBatchResponse) GetInfos() []*FileInfo {
@@ -2780,7 +3324,7 @@ type StatRequest struct {
 
 func (x *StatRequest) Reset() {
 	*x = StatRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[47]
+	mi := &file_mountos_fs_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2792,7 +3336,7 @@ func (x *StatRequest) String() string {
 func (*StatRequest) ProtoMessage() {}
 
 func (x *StatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[47]
+	mi := &file_mountos_fs_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2805,7 +3349,7 @@ func (x *StatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatRequest.ProtoReflect.Descriptor instead.
 func (*StatRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{47}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *StatRequest) GetPath() string {
@@ -2824,7 +3368,7 @@ type StatResponse struct {
 
 func (x *StatResponse) Reset() {
 	*x = StatResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[48]
+	mi := &file_mountos_fs_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2836,7 +3380,7 @@ func (x *StatResponse) String() string {
 func (*StatResponse) ProtoMessage() {}
 
 func (x *StatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[48]
+	mi := &file_mountos_fs_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2849,7 +3393,7 @@ func (x *StatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatResponse.ProtoReflect.Descriptor instead.
 func (*StatResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{48}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *StatResponse) GetInfo() *FileInfo {
@@ -2868,7 +3412,7 @@ type StatfsRequest struct {
 
 func (x *StatfsRequest) Reset() {
 	*x = StatfsRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[49]
+	mi := &file_mountos_fs_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2880,7 +3424,7 @@ func (x *StatfsRequest) String() string {
 func (*StatfsRequest) ProtoMessage() {}
 
 func (x *StatfsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[49]
+	mi := &file_mountos_fs_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2893,7 +3437,7 @@ func (x *StatfsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatfsRequest.ProtoReflect.Descriptor instead.
 func (*StatfsRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{49}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *StatfsRequest) GetPath() string {
@@ -2918,7 +3462,7 @@ type StatfsResponse struct {
 
 func (x *StatfsResponse) Reset() {
 	*x = StatfsResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[50]
+	mi := &file_mountos_fs_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2930,7 +3474,7 @@ func (x *StatfsResponse) String() string {
 func (*StatfsResponse) ProtoMessage() {}
 
 func (x *StatfsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[50]
+	mi := &file_mountos_fs_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2943,7 +3487,7 @@ func (x *StatfsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatfsResponse.ProtoReflect.Descriptor instead.
 func (*StatfsResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{50}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *StatfsResponse) GetBlockSize() uint32 {
@@ -3005,7 +3549,7 @@ type SymlinkRequest struct {
 
 func (x *SymlinkRequest) Reset() {
 	*x = SymlinkRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[51]
+	mi := &file_mountos_fs_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3017,7 +3561,7 @@ func (x *SymlinkRequest) String() string {
 func (*SymlinkRequest) ProtoMessage() {}
 
 func (x *SymlinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[51]
+	mi := &file_mountos_fs_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3030,7 +3574,7 @@ func (x *SymlinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SymlinkRequest.ProtoReflect.Descriptor instead.
 func (*SymlinkRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{51}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *SymlinkRequest) GetTarget() string {
@@ -3057,7 +3601,7 @@ type TruncateRequest struct {
 
 func (x *TruncateRequest) Reset() {
 	*x = TruncateRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[52]
+	mi := &file_mountos_fs_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3069,7 +3613,7 @@ func (x *TruncateRequest) String() string {
 func (*TruncateRequest) ProtoMessage() {}
 
 func (x *TruncateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[52]
+	mi := &file_mountos_fs_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3082,7 +3626,7 @@ func (x *TruncateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TruncateRequest.ProtoReflect.Descriptor instead.
 func (*TruncateRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{52}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *TruncateRequest) GetPath() string {
@@ -3108,7 +3652,7 @@ type UnlinkRequest struct {
 
 func (x *UnlinkRequest) Reset() {
 	*x = UnlinkRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[53]
+	mi := &file_mountos_fs_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3120,7 +3664,7 @@ func (x *UnlinkRequest) String() string {
 func (*UnlinkRequest) ProtoMessage() {}
 
 func (x *UnlinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[53]
+	mi := &file_mountos_fs_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3133,7 +3677,7 @@ func (x *UnlinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlinkRequest.ProtoReflect.Descriptor instead.
 func (*UnlinkRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{53}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *UnlinkRequest) GetPath() string {
@@ -3152,7 +3696,7 @@ type UnwatchRequest struct {
 
 func (x *UnwatchRequest) Reset() {
 	*x = UnwatchRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[54]
+	mi := &file_mountos_fs_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3164,7 +3708,7 @@ func (x *UnwatchRequest) String() string {
 func (*UnwatchRequest) ProtoMessage() {}
 
 func (x *UnwatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[54]
+	mi := &file_mountos_fs_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3177,7 +3721,7 @@ func (x *UnwatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnwatchRequest.ProtoReflect.Descriptor instead.
 func (*UnwatchRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{54}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *UnwatchRequest) GetWatchId() uint64 {
@@ -3200,7 +3744,7 @@ type UtimensRequest struct {
 
 func (x *UtimensRequest) Reset() {
 	*x = UtimensRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[55]
+	mi := &file_mountos_fs_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3212,7 +3756,7 @@ func (x *UtimensRequest) String() string {
 func (*UtimensRequest) ProtoMessage() {}
 
 func (x *UtimensRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[55]
+	mi := &file_mountos_fs_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3225,7 +3769,7 @@ func (x *UtimensRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UtimensRequest.ProtoReflect.Descriptor instead.
 func (*UtimensRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{55}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *UtimensRequest) GetPath() string {
@@ -3272,7 +3816,7 @@ type WarmOpenRequest struct {
 
 func (x *WarmOpenRequest) Reset() {
 	*x = WarmOpenRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[56]
+	mi := &file_mountos_fs_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3284,7 +3828,7 @@ func (x *WarmOpenRequest) String() string {
 func (*WarmOpenRequest) ProtoMessage() {}
 
 func (x *WarmOpenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[56]
+	mi := &file_mountos_fs_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3297,7 +3841,7 @@ func (x *WarmOpenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WarmOpenRequest.ProtoReflect.Descriptor instead.
 func (*WarmOpenRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{56}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *WarmOpenRequest) GetPath() string {
@@ -3316,7 +3860,7 @@ type WarmOpenResponse struct {
 
 func (x *WarmOpenResponse) Reset() {
 	*x = WarmOpenResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[57]
+	mi := &file_mountos_fs_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3328,7 +3872,7 @@ func (x *WarmOpenResponse) String() string {
 func (*WarmOpenResponse) ProtoMessage() {}
 
 func (x *WarmOpenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[57]
+	mi := &file_mountos_fs_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3341,7 +3885,7 @@ func (x *WarmOpenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WarmOpenResponse.ProtoReflect.Descriptor instead.
 func (*WarmOpenResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{57}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *WarmOpenResponse) GetWarmId() uint64 {
@@ -3362,7 +3906,7 @@ type WarmReadRequest struct {
 
 func (x *WarmReadRequest) Reset() {
 	*x = WarmReadRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[58]
+	mi := &file_mountos_fs_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3374,7 +3918,7 @@ func (x *WarmReadRequest) String() string {
 func (*WarmReadRequest) ProtoMessage() {}
 
 func (x *WarmReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[58]
+	mi := &file_mountos_fs_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3387,7 +3931,7 @@ func (x *WarmReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WarmReadRequest.ProtoReflect.Descriptor instead.
 func (*WarmReadRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{58}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *WarmReadRequest) GetPath() string {
@@ -3420,7 +3964,7 @@ type WarmReadResponse struct {
 
 func (x *WarmReadResponse) Reset() {
 	*x = WarmReadResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[59]
+	mi := &file_mountos_fs_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3432,7 +3976,7 @@ func (x *WarmReadResponse) String() string {
 func (*WarmReadResponse) ProtoMessage() {}
 
 func (x *WarmReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[59]
+	mi := &file_mountos_fs_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3445,7 +3989,7 @@ func (x *WarmReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WarmReadResponse.ProtoReflect.Descriptor instead.
 func (*WarmReadResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{59}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *WarmReadResponse) GetWarmId() uint64 {
@@ -3466,7 +4010,7 @@ type WatchRequest struct {
 
 func (x *WatchRequest) Reset() {
 	*x = WatchRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[60]
+	mi := &file_mountos_fs_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3478,7 +4022,7 @@ func (x *WatchRequest) String() string {
 func (*WatchRequest) ProtoMessage() {}
 
 func (x *WatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[60]
+	mi := &file_mountos_fs_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3491,7 +4035,7 @@ func (x *WatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRequest.ProtoReflect.Descriptor instead.
 func (*WatchRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{60}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *WatchRequest) GetPath() string {
@@ -3524,7 +4068,7 @@ type WatchResponse struct {
 
 func (x *WatchResponse) Reset() {
 	*x = WatchResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[61]
+	mi := &file_mountos_fs_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3536,7 +4080,7 @@ func (x *WatchResponse) String() string {
 func (*WatchResponse) ProtoMessage() {}
 
 func (x *WatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[61]
+	mi := &file_mountos_fs_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3549,7 +4093,7 @@ func (x *WatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchResponse.ProtoReflect.Descriptor instead.
 func (*WatchResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{61}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *WatchResponse) GetWatchId() uint64 {
@@ -3569,7 +4113,7 @@ type WireError struct {
 
 func (x *WireError) Reset() {
 	*x = WireError{}
-	mi := &file_mountos_fs_proto_msgTypes[62]
+	mi := &file_mountos_fs_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3581,7 +4125,7 @@ func (x *WireError) String() string {
 func (*WireError) ProtoMessage() {}
 
 func (x *WireError) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[62]
+	mi := &file_mountos_fs_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3594,7 +4138,7 @@ func (x *WireError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WireError.ProtoReflect.Descriptor instead.
 func (*WireError) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{62}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *WireError) GetCode() string {
@@ -3621,7 +4165,7 @@ type WriteAtRequest struct {
 
 func (x *WriteAtRequest) Reset() {
 	*x = WriteAtRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[63]
+	mi := &file_mountos_fs_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3633,7 +4177,7 @@ func (x *WriteAtRequest) String() string {
 func (*WriteAtRequest) ProtoMessage() {}
 
 func (x *WriteAtRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[63]
+	mi := &file_mountos_fs_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3646,7 +4190,7 @@ func (x *WriteAtRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteAtRequest.ProtoReflect.Descriptor instead.
 func (*WriteAtRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{63}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *WriteAtRequest) GetHandle() uint64 {
@@ -3672,7 +4216,7 @@ type WriteAtResponse struct {
 
 func (x *WriteAtResponse) Reset() {
 	*x = WriteAtResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[64]
+	mi := &file_mountos_fs_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3684,7 +4228,7 @@ func (x *WriteAtResponse) String() string {
 func (*WriteAtResponse) ProtoMessage() {}
 
 func (x *WriteAtResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[64]
+	mi := &file_mountos_fs_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3697,7 +4241,7 @@ func (x *WriteAtResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteAtResponse.ProtoReflect.Descriptor instead.
 func (*WriteAtResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{64}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *WriteAtResponse) GetCount() uint32 {
@@ -3717,7 +4261,7 @@ type WriteBatchRequest struct {
 
 func (x *WriteBatchRequest) Reset() {
 	*x = WriteBatchRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[65]
+	mi := &file_mountos_fs_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3729,7 +4273,7 @@ func (x *WriteBatchRequest) String() string {
 func (*WriteBatchRequest) ProtoMessage() {}
 
 func (x *WriteBatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[65]
+	mi := &file_mountos_fs_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3742,7 +4286,7 @@ func (x *WriteBatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteBatchRequest.ProtoReflect.Descriptor instead.
 func (*WriteBatchRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{65}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *WriteBatchRequest) GetHandle() uint64 {
@@ -3769,7 +4313,7 @@ type WriteBatchResponse struct {
 
 func (x *WriteBatchResponse) Reset() {
 	*x = WriteBatchResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[66]
+	mi := &file_mountos_fs_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3781,7 +4325,7 @@ func (x *WriteBatchResponse) String() string {
 func (*WriteBatchResponse) ProtoMessage() {}
 
 func (x *WriteBatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[66]
+	mi := &file_mountos_fs_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3794,7 +4338,7 @@ func (x *WriteBatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteBatchResponse.ProtoReflect.Descriptor instead.
 func (*WriteBatchResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{66}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *WriteBatchResponse) GetCounts() []uint32 {
@@ -3821,7 +4365,7 @@ type WriteFileRequest struct {
 
 func (x *WriteFileRequest) Reset() {
 	*x = WriteFileRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[67]
+	mi := &file_mountos_fs_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3833,7 +4377,7 @@ func (x *WriteFileRequest) String() string {
 func (*WriteFileRequest) ProtoMessage() {}
 
 func (x *WriteFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[67]
+	mi := &file_mountos_fs_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3846,7 +4390,7 @@ func (x *WriteFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileRequest.ProtoReflect.Descriptor instead.
 func (*WriteFileRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{67}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *WriteFileRequest) GetPath() string {
@@ -3872,7 +4416,7 @@ type WriteFileResponse struct {
 
 func (x *WriteFileResponse) Reset() {
 	*x = WriteFileResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[68]
+	mi := &file_mountos_fs_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3884,7 +4428,7 @@ func (x *WriteFileResponse) String() string {
 func (*WriteFileResponse) ProtoMessage() {}
 
 func (x *WriteFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[68]
+	mi := &file_mountos_fs_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3897,7 +4441,7 @@ func (x *WriteFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileResponse.ProtoReflect.Descriptor instead.
 func (*WriteFileResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{68}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *WriteFileResponse) GetCount() uint32 {
@@ -3916,7 +4460,7 @@ type WriteRequest struct {
 
 func (x *WriteRequest) Reset() {
 	*x = WriteRequest{}
-	mi := &file_mountos_fs_proto_msgTypes[69]
+	mi := &file_mountos_fs_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3928,7 +4472,7 @@ func (x *WriteRequest) String() string {
 func (*WriteRequest) ProtoMessage() {}
 
 func (x *WriteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[69]
+	mi := &file_mountos_fs_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3941,7 +4485,7 @@ func (x *WriteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteRequest.ProtoReflect.Descriptor instead.
 func (*WriteRequest) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{69}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *WriteRequest) GetHandle() uint64 {
@@ -3960,7 +4504,7 @@ type WriteResponse struct {
 
 func (x *WriteResponse) Reset() {
 	*x = WriteResponse{}
-	mi := &file_mountos_fs_proto_msgTypes[70]
+	mi := &file_mountos_fs_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3972,7 +4516,7 @@ func (x *WriteResponse) String() string {
 func (*WriteResponse) ProtoMessage() {}
 
 func (x *WriteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mountos_fs_proto_msgTypes[70]
+	mi := &file_mountos_fs_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3985,7 +4529,7 @@ func (x *WriteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteResponse.ProtoReflect.Descriptor instead.
 func (*WriteResponse) Descriptor() ([]byte, []int) {
-	return file_mountos_fs_proto_rawDescGZIP(), []int{70}
+	return file_mountos_fs_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *WriteResponse) GetCount() uint32 {
@@ -4009,7 +4553,22 @@ const file_mountos_fs_proto_rawDesc = "" +
 	"\amessage\x18\x03 \x01(\tR\amessage\"6\n" +
 	"\fChmodRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
-	"\x04mode\x18\x02 \x01(\rR\x04mode\"&\n" +
+	"\x04mode\x18\x02 \x01(\rR\x04mode\"t\n" +
+	"\x0fCloneDirRequest\x12\x12\n" +
+	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
+	"\x02to\x18\x02 \x01(\tR\x02to\x12=\n" +
+	"\aoptions\x18\x03 \x01(\v2#.mountos.filesystem.v1.CloneOptionsR\aoptions\"'\n" +
+	"\x10CloneDirResponse\x12\x13\n" +
+	"\x05op_id\x18\x01 \x01(\x04R\x04opId\"m\n" +
+	"\fCloneOptions\x12\x1c\n" +
+	"\toverwrite\x18\x01 \x01(\bR\toverwrite\x12?\n" +
+	"\bpreserve\x18\x02 \x03(\x0e2#.mountos.filesystem.v1.PreserveKindR\bpreserve\"q\n" +
+	"\fCloneRequest\x12\x12\n" +
+	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
+	"\x02to\x18\x02 \x01(\tR\x02to\x12=\n" +
+	"\aoptions\x18\x03 \x01(\v2#.mountos.filesystem.v1.CloneOptionsR\aoptions\"N\n" +
+	"\rCloneResponse\x12=\n" +
+	"\aoutcome\x18\x01 \x01(\x0e2#.mountos.filesystem.v1.CloneOutcomeR\aoutcome\"&\n" +
 	"\fCloseRequest\x12\x16\n" +
 	"\x06handle\x18\x01 \x01(\x04R\x06handle\")\n" +
 	"\x0fClosedirRequest\x12\x16\n" +
@@ -4078,7 +4637,7 @@ const file_mountos_fs_proto_rawDesc = "" +
 	"\x04info\x18\x01 \x01(\v2\x1f.mountos.filesystem.v1.FileInfoR\x04info\"6\n" +
 	"\fMkdirRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
-	"\x04mode\x18\x02 \x01(\rR\x04mode\"\x97\x02\n" +
+	"\x04mode\x18\x02 \x01(\rR\x04mode\"\xbb\x03\n" +
 	"\x06Notice\x125\n" +
 	"\x04kind\x18\x01 \x01(\x0e2!.mountos.filesystem.v1.NoticeKindR\x04kind\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12\x15\n" +
@@ -4088,7 +4647,16 @@ const file_mountos_fs_proto_rawDesc = "" +
 	"\amessage\x18\x06 \x01(\tR\amessage\x12F\n" +
 	"\vchange_kind\x18\a \x01(\x0e2%.mountos.filesystem.v1.WatchEventKindR\n" +
 	"changeKind\x12\x19\n" +
-	"\bold_path\x18\b \x01(\tR\aoldPath\"K\n" +
+	"\bold_path\x18\b \x01(\tR\aoldPath\x12\x16\n" +
+	"\x06cloned\x18\t \x01(\x04R\x06cloned\x12 \n" +
+	"\voverwritten\x18\n" +
+	" \x01(\x04R\voverwritten\x12\x18\n" +
+	"\askipped\x18\v \x01(\x04R\askipped\x12\x16\n" +
+	"\x06failed\x18\f \x01(\x04R\x06failed\x12\x18\n" +
+	"\aremoved\x18\r \x01(\x04R\aremoved\x12\x1c\n" +
+	"\tprotected\x18\x0e \x01(\x04R\tprotected\"&\n" +
+	"\x0fOpCancelRequest\x12\x13\n" +
+	"\x05op_id\x18\x01 \x01(\x04R\x04opId\"K\n" +
 	"\vOpenRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x14\n" +
 	"\x05flags\x18\x02 \x01(\rR\x05flags\x12\x12\n" +
@@ -4138,7 +4706,11 @@ const file_mountos_fs_proto_rawDesc = "" +
 	"\x10RemoveAllRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"-\n" +
 	"\x11RemoveAllResponse\x12\x18\n" +
-	"\aremoved\x18\x01 \x01(\x04R\aremoved\"3\n" +
+	"\aremoved\x18\x01 \x01(\x04R\aremoved\"&\n" +
+	"\x10RemoveDirRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"(\n" +
+	"\x11RemoveDirResponse\x12\x13\n" +
+	"\x05op_id\x18\x01 \x01(\x04R\x04opId\"3\n" +
 	"\rRenameRequest\x12\x12\n" +
 	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
 	"\x02to\x18\x02 \x01(\tR\x02to\"\"\n" +
@@ -4226,18 +4798,24 @@ const file_mountos_fs_proto_rawDesc = "" +
 	"\fWriteRequest\x12\x16\n" +
 	"\x06handle\x18\x01 \x01(\x04R\x06handle\"%\n" +
 	"\rWriteResponse\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\rR\x05count*Q\n" +
+	"\x05count\x18\x01 \x01(\rR\x05count*b\n" +
+	"\fCloneOutcome\x12\x18\n" +
+	"\x14CLONE_OUTCOME_CLONED\x10\x00\x12\x1d\n" +
+	"\x19CLONE_OUTCOME_OVERWRITTEN\x10\x01\x12\x19\n" +
+	"\x15CLONE_OUTCOME_SKIPPED\x10\x02*Q\n" +
 	"\bFileType\x12\x15\n" +
 	"\x11FILE_TYPE_REGULAR\x10\x00\x12\x17\n" +
 	"\x13FILE_TYPE_DIRECTORY\x10\x01\x12\x15\n" +
-	"\x11FILE_TYPE_SYMLINK\x10\x02*\x8f\x01\n" +
+	"\x11FILE_TYPE_SYMLINK\x10\x02*\xc3\x01\n" +
 	"\n" +
 	"NoticeKind\x12\x19\n" +
 	"\x15NOTICE_KIND_WARM_DONE\x10\x00\x12\x1b\n" +
 	"\x17NOTICE_KIND_WARM_FAILED\x10\x01\x12\x17\n" +
 	"\x13NOTICE_KIND_CLOSING\x10\x02\x12\x18\n" +
 	"\x14NOTICE_KIND_OVERFLOW\x10\x03\x12\x16\n" +
-	"\x12NOTICE_KIND_CHANGE\x10\x04*\xaf\x01\n" +
+	"\x12NOTICE_KIND_CHANGE\x10\x04\x12\x17\n" +
+	"\x13NOTICE_KIND_OP_DONE\x10\x05\x12\x19\n" +
+	"\x15NOTICE_KIND_OP_FAILED\x10\x06*\xaf\x01\n" +
 	"\bOpenFlag\x12\x17\n" +
 	"\x13OPEN_FLAG_READ_ONLY\x10\x00\x12\x18\n" +
 	"\x14OPEN_FLAG_WRITE_ONLY\x10\x01\x12\x18\n" +
@@ -4245,7 +4823,11 @@ const file_mountos_fs_proto_rawDesc = "" +
 	"\x10OPEN_FLAG_CREATE\x10@\x12\x13\n" +
 	"\x0eOPEN_FLAG_EXCL\x10\x80\x01\x12\x14\n" +
 	"\x0fOPEN_FLAG_TRUNC\x10\x80\x04\x12\x15\n" +
-	"\x10OPEN_FLAG_APPEND\x10\x80\b*\xbf\x01\n" +
+	"\x10OPEN_FLAG_APPEND\x10\x80\b*W\n" +
+	"\fPreserveKind\x12\x17\n" +
+	"\x13PRESERVE_KIND_TIMES\x10\x00\x12\x17\n" +
+	"\x13PRESERVE_KIND_XATTR\x10\x01\x12\x15\n" +
+	"\x11PRESERVE_KIND_ACL\x10\x02*\xbf\x01\n" +
 	"\x0eWatchEventKind\x12\x1b\n" +
 	"\x17WATCH_EVENT_KIND_CREATE\x10\x00\x12\x1b\n" +
 	"\x17WATCH_EVENT_KIND_REMOVE\x10\x01\x12\x1a\n" +
@@ -4273,109 +4855,123 @@ func file_mountos_fs_proto_rawDescGZIP() []byte {
 	return file_mountos_fs_proto_rawDescData
 }
 
-var file_mountos_fs_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_mountos_fs_proto_msgTypes = make([]protoimpl.MessageInfo, 71)
+var file_mountos_fs_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
+var file_mountos_fs_proto_msgTypes = make([]protoimpl.MessageInfo, 79)
 var file_mountos_fs_proto_goTypes = []any{
-	(FileType)(0),              // 0: mountos.filesystem.v1.FileType
-	(NoticeKind)(0),            // 1: mountos.filesystem.v1.NoticeKind
-	(OpenFlag)(0),              // 2: mountos.filesystem.v1.OpenFlag
-	(WatchEventKind)(0),        // 3: mountos.filesystem.v1.WatchEventKind
-	(Whence)(0),                // 4: mountos.filesystem.v1.Whence
-	(*AccessRequest)(nil),      // 5: mountos.filesystem.v1.AccessRequest
-	(*BatchItemError)(nil),     // 6: mountos.filesystem.v1.BatchItemError
-	(*ChmodRequest)(nil),       // 7: mountos.filesystem.v1.ChmodRequest
-	(*CloseRequest)(nil),       // 8: mountos.filesystem.v1.CloseRequest
-	(*ClosedirRequest)(nil),    // 9: mountos.filesystem.v1.ClosedirRequest
-	(*DirEntry)(nil),           // 10: mountos.filesystem.v1.DirEntry
-	(*Empty)(nil),              // 11: mountos.filesystem.v1.Empty
-	(*FileInfo)(nil),           // 12: mountos.filesystem.v1.FileInfo
-	(*FlushRequest)(nil),       // 13: mountos.filesystem.v1.FlushRequest
-	(*FstatRequest)(nil),       // 14: mountos.filesystem.v1.FstatRequest
-	(*FstatResponse)(nil),      // 15: mountos.filesystem.v1.FstatResponse
-	(*FsyncRequest)(nil),       // 16: mountos.filesystem.v1.FsyncRequest
-	(*FtruncateRequest)(nil),   // 17: mountos.filesystem.v1.FtruncateRequest
-	(*HelloRequest)(nil),       // 18: mountos.filesystem.v1.HelloRequest
-	(*HelloResponse)(nil),      // 19: mountos.filesystem.v1.HelloResponse
-	(*LinkRequest)(nil),        // 20: mountos.filesystem.v1.LinkRequest
-	(*LsRequest)(nil),          // 21: mountos.filesystem.v1.LsRequest
-	(*LsResponse)(nil),         // 22: mountos.filesystem.v1.LsResponse
-	(*LstatRequest)(nil),       // 23: mountos.filesystem.v1.LstatRequest
-	(*LstatResponse)(nil),      // 24: mountos.filesystem.v1.LstatResponse
-	(*MkdirRequest)(nil),       // 25: mountos.filesystem.v1.MkdirRequest
-	(*Notice)(nil),             // 26: mountos.filesystem.v1.Notice
-	(*OpenRequest)(nil),        // 27: mountos.filesystem.v1.OpenRequest
-	(*OpenResponse)(nil),       // 28: mountos.filesystem.v1.OpenResponse
-	(*OpendirRequest)(nil),     // 29: mountos.filesystem.v1.OpendirRequest
-	(*OpendirResponse)(nil),    // 30: mountos.filesystem.v1.OpendirResponse
-	(*Range)(nil),              // 31: mountos.filesystem.v1.Range
-	(*ReadAtRequest)(nil),      // 32: mountos.filesystem.v1.ReadAtRequest
-	(*ReadAtResponse)(nil),     // 33: mountos.filesystem.v1.ReadAtResponse
-	(*ReadBatchRequest)(nil),   // 34: mountos.filesystem.v1.ReadBatchRequest
-	(*ReadBatchResponse)(nil),  // 35: mountos.filesystem.v1.ReadBatchResponse
-	(*ReadFileRequest)(nil),    // 36: mountos.filesystem.v1.ReadFileRequest
-	(*ReadFileResponse)(nil),   // 37: mountos.filesystem.v1.ReadFileResponse
-	(*ReadRequest)(nil),        // 38: mountos.filesystem.v1.ReadRequest
-	(*ReadResponse)(nil),       // 39: mountos.filesystem.v1.ReadResponse
-	(*ReaddirRequest)(nil),     // 40: mountos.filesystem.v1.ReaddirRequest
-	(*ReaddirResponse)(nil),    // 41: mountos.filesystem.v1.ReaddirResponse
-	(*ReadlinkRequest)(nil),    // 42: mountos.filesystem.v1.ReadlinkRequest
-	(*ReadlinkResponse)(nil),   // 43: mountos.filesystem.v1.ReadlinkResponse
-	(*RemoveAllRequest)(nil),   // 44: mountos.filesystem.v1.RemoveAllRequest
-	(*RemoveAllResponse)(nil),  // 45: mountos.filesystem.v1.RemoveAllResponse
-	(*RenameRequest)(nil),      // 46: mountos.filesystem.v1.RenameRequest
-	(*RmdirRequest)(nil),       // 47: mountos.filesystem.v1.RmdirRequest
-	(*SeekRequest)(nil),        // 48: mountos.filesystem.v1.SeekRequest
-	(*SeekResponse)(nil),       // 49: mountos.filesystem.v1.SeekResponse
-	(*StatBatchRequest)(nil),   // 50: mountos.filesystem.v1.StatBatchRequest
-	(*StatBatchResponse)(nil),  // 51: mountos.filesystem.v1.StatBatchResponse
-	(*StatRequest)(nil),        // 52: mountos.filesystem.v1.StatRequest
-	(*StatResponse)(nil),       // 53: mountos.filesystem.v1.StatResponse
-	(*StatfsRequest)(nil),      // 54: mountos.filesystem.v1.StatfsRequest
-	(*StatfsResponse)(nil),     // 55: mountos.filesystem.v1.StatfsResponse
-	(*SymlinkRequest)(nil),     // 56: mountos.filesystem.v1.SymlinkRequest
-	(*TruncateRequest)(nil),    // 57: mountos.filesystem.v1.TruncateRequest
-	(*UnlinkRequest)(nil),      // 58: mountos.filesystem.v1.UnlinkRequest
-	(*UnwatchRequest)(nil),     // 59: mountos.filesystem.v1.UnwatchRequest
-	(*UtimensRequest)(nil),     // 60: mountos.filesystem.v1.UtimensRequest
-	(*WarmOpenRequest)(nil),    // 61: mountos.filesystem.v1.WarmOpenRequest
-	(*WarmOpenResponse)(nil),   // 62: mountos.filesystem.v1.WarmOpenResponse
-	(*WarmReadRequest)(nil),    // 63: mountos.filesystem.v1.WarmReadRequest
-	(*WarmReadResponse)(nil),   // 64: mountos.filesystem.v1.WarmReadResponse
-	(*WatchRequest)(nil),       // 65: mountos.filesystem.v1.WatchRequest
-	(*WatchResponse)(nil),      // 66: mountos.filesystem.v1.WatchResponse
-	(*WireError)(nil),          // 67: mountos.filesystem.v1.WireError
-	(*WriteAtRequest)(nil),     // 68: mountos.filesystem.v1.WriteAtRequest
-	(*WriteAtResponse)(nil),    // 69: mountos.filesystem.v1.WriteAtResponse
-	(*WriteBatchRequest)(nil),  // 70: mountos.filesystem.v1.WriteBatchRequest
-	(*WriteBatchResponse)(nil), // 71: mountos.filesystem.v1.WriteBatchResponse
-	(*WriteFileRequest)(nil),   // 72: mountos.filesystem.v1.WriteFileRequest
-	(*WriteFileResponse)(nil),  // 73: mountos.filesystem.v1.WriteFileResponse
-	(*WriteRequest)(nil),       // 74: mountos.filesystem.v1.WriteRequest
-	(*WriteResponse)(nil),      // 75: mountos.filesystem.v1.WriteResponse
+	(CloneOutcome)(0),          // 0: mountos.filesystem.v1.CloneOutcome
+	(FileType)(0),              // 1: mountos.filesystem.v1.FileType
+	(NoticeKind)(0),            // 2: mountos.filesystem.v1.NoticeKind
+	(OpenFlag)(0),              // 3: mountos.filesystem.v1.OpenFlag
+	(PreserveKind)(0),          // 4: mountos.filesystem.v1.PreserveKind
+	(WatchEventKind)(0),        // 5: mountos.filesystem.v1.WatchEventKind
+	(Whence)(0),                // 6: mountos.filesystem.v1.Whence
+	(*AccessRequest)(nil),      // 7: mountos.filesystem.v1.AccessRequest
+	(*BatchItemError)(nil),     // 8: mountos.filesystem.v1.BatchItemError
+	(*ChmodRequest)(nil),       // 9: mountos.filesystem.v1.ChmodRequest
+	(*CloneDirRequest)(nil),    // 10: mountos.filesystem.v1.CloneDirRequest
+	(*CloneDirResponse)(nil),   // 11: mountos.filesystem.v1.CloneDirResponse
+	(*CloneOptions)(nil),       // 12: mountos.filesystem.v1.CloneOptions
+	(*CloneRequest)(nil),       // 13: mountos.filesystem.v1.CloneRequest
+	(*CloneResponse)(nil),      // 14: mountos.filesystem.v1.CloneResponse
+	(*CloseRequest)(nil),       // 15: mountos.filesystem.v1.CloseRequest
+	(*ClosedirRequest)(nil),    // 16: mountos.filesystem.v1.ClosedirRequest
+	(*DirEntry)(nil),           // 17: mountos.filesystem.v1.DirEntry
+	(*Empty)(nil),              // 18: mountos.filesystem.v1.Empty
+	(*FileInfo)(nil),           // 19: mountos.filesystem.v1.FileInfo
+	(*FlushRequest)(nil),       // 20: mountos.filesystem.v1.FlushRequest
+	(*FstatRequest)(nil),       // 21: mountos.filesystem.v1.FstatRequest
+	(*FstatResponse)(nil),      // 22: mountos.filesystem.v1.FstatResponse
+	(*FsyncRequest)(nil),       // 23: mountos.filesystem.v1.FsyncRequest
+	(*FtruncateRequest)(nil),   // 24: mountos.filesystem.v1.FtruncateRequest
+	(*HelloRequest)(nil),       // 25: mountos.filesystem.v1.HelloRequest
+	(*HelloResponse)(nil),      // 26: mountos.filesystem.v1.HelloResponse
+	(*LinkRequest)(nil),        // 27: mountos.filesystem.v1.LinkRequest
+	(*LsRequest)(nil),          // 28: mountos.filesystem.v1.LsRequest
+	(*LsResponse)(nil),         // 29: mountos.filesystem.v1.LsResponse
+	(*LstatRequest)(nil),       // 30: mountos.filesystem.v1.LstatRequest
+	(*LstatResponse)(nil),      // 31: mountos.filesystem.v1.LstatResponse
+	(*MkdirRequest)(nil),       // 32: mountos.filesystem.v1.MkdirRequest
+	(*Notice)(nil),             // 33: mountos.filesystem.v1.Notice
+	(*OpCancelRequest)(nil),    // 34: mountos.filesystem.v1.OpCancelRequest
+	(*OpenRequest)(nil),        // 35: mountos.filesystem.v1.OpenRequest
+	(*OpenResponse)(nil),       // 36: mountos.filesystem.v1.OpenResponse
+	(*OpendirRequest)(nil),     // 37: mountos.filesystem.v1.OpendirRequest
+	(*OpendirResponse)(nil),    // 38: mountos.filesystem.v1.OpendirResponse
+	(*Range)(nil),              // 39: mountos.filesystem.v1.Range
+	(*ReadAtRequest)(nil),      // 40: mountos.filesystem.v1.ReadAtRequest
+	(*ReadAtResponse)(nil),     // 41: mountos.filesystem.v1.ReadAtResponse
+	(*ReadBatchRequest)(nil),   // 42: mountos.filesystem.v1.ReadBatchRequest
+	(*ReadBatchResponse)(nil),  // 43: mountos.filesystem.v1.ReadBatchResponse
+	(*ReadFileRequest)(nil),    // 44: mountos.filesystem.v1.ReadFileRequest
+	(*ReadFileResponse)(nil),   // 45: mountos.filesystem.v1.ReadFileResponse
+	(*ReadRequest)(nil),        // 46: mountos.filesystem.v1.ReadRequest
+	(*ReadResponse)(nil),       // 47: mountos.filesystem.v1.ReadResponse
+	(*ReaddirRequest)(nil),     // 48: mountos.filesystem.v1.ReaddirRequest
+	(*ReaddirResponse)(nil),    // 49: mountos.filesystem.v1.ReaddirResponse
+	(*ReadlinkRequest)(nil),    // 50: mountos.filesystem.v1.ReadlinkRequest
+	(*ReadlinkResponse)(nil),   // 51: mountos.filesystem.v1.ReadlinkResponse
+	(*RemoveAllRequest)(nil),   // 52: mountos.filesystem.v1.RemoveAllRequest
+	(*RemoveAllResponse)(nil),  // 53: mountos.filesystem.v1.RemoveAllResponse
+	(*RemoveDirRequest)(nil),   // 54: mountos.filesystem.v1.RemoveDirRequest
+	(*RemoveDirResponse)(nil),  // 55: mountos.filesystem.v1.RemoveDirResponse
+	(*RenameRequest)(nil),      // 56: mountos.filesystem.v1.RenameRequest
+	(*RmdirRequest)(nil),       // 57: mountos.filesystem.v1.RmdirRequest
+	(*SeekRequest)(nil),        // 58: mountos.filesystem.v1.SeekRequest
+	(*SeekResponse)(nil),       // 59: mountos.filesystem.v1.SeekResponse
+	(*StatBatchRequest)(nil),   // 60: mountos.filesystem.v1.StatBatchRequest
+	(*StatBatchResponse)(nil),  // 61: mountos.filesystem.v1.StatBatchResponse
+	(*StatRequest)(nil),        // 62: mountos.filesystem.v1.StatRequest
+	(*StatResponse)(nil),       // 63: mountos.filesystem.v1.StatResponse
+	(*StatfsRequest)(nil),      // 64: mountos.filesystem.v1.StatfsRequest
+	(*StatfsResponse)(nil),     // 65: mountos.filesystem.v1.StatfsResponse
+	(*SymlinkRequest)(nil),     // 66: mountos.filesystem.v1.SymlinkRequest
+	(*TruncateRequest)(nil),    // 67: mountos.filesystem.v1.TruncateRequest
+	(*UnlinkRequest)(nil),      // 68: mountos.filesystem.v1.UnlinkRequest
+	(*UnwatchRequest)(nil),     // 69: mountos.filesystem.v1.UnwatchRequest
+	(*UtimensRequest)(nil),     // 70: mountos.filesystem.v1.UtimensRequest
+	(*WarmOpenRequest)(nil),    // 71: mountos.filesystem.v1.WarmOpenRequest
+	(*WarmOpenResponse)(nil),   // 72: mountos.filesystem.v1.WarmOpenResponse
+	(*WarmReadRequest)(nil),    // 73: mountos.filesystem.v1.WarmReadRequest
+	(*WarmReadResponse)(nil),   // 74: mountos.filesystem.v1.WarmReadResponse
+	(*WatchRequest)(nil),       // 75: mountos.filesystem.v1.WatchRequest
+	(*WatchResponse)(nil),      // 76: mountos.filesystem.v1.WatchResponse
+	(*WireError)(nil),          // 77: mountos.filesystem.v1.WireError
+	(*WriteAtRequest)(nil),     // 78: mountos.filesystem.v1.WriteAtRequest
+	(*WriteAtResponse)(nil),    // 79: mountos.filesystem.v1.WriteAtResponse
+	(*WriteBatchRequest)(nil),  // 80: mountos.filesystem.v1.WriteBatchRequest
+	(*WriteBatchResponse)(nil), // 81: mountos.filesystem.v1.WriteBatchResponse
+	(*WriteFileRequest)(nil),   // 82: mountos.filesystem.v1.WriteFileRequest
+	(*WriteFileResponse)(nil),  // 83: mountos.filesystem.v1.WriteFileResponse
+	(*WriteRequest)(nil),       // 84: mountos.filesystem.v1.WriteRequest
+	(*WriteResponse)(nil),      // 85: mountos.filesystem.v1.WriteResponse
 }
 var file_mountos_fs_proto_depIdxs = []int32{
-	0,  // 0: mountos.filesystem.v1.DirEntry.type:type_name -> mountos.filesystem.v1.FileType
-	12, // 1: mountos.filesystem.v1.DirEntry.info:type_name -> mountos.filesystem.v1.FileInfo
-	0,  // 2: mountos.filesystem.v1.FileInfo.type:type_name -> mountos.filesystem.v1.FileType
-	12, // 3: mountos.filesystem.v1.FstatResponse.info:type_name -> mountos.filesystem.v1.FileInfo
-	10, // 4: mountos.filesystem.v1.LsResponse.entries:type_name -> mountos.filesystem.v1.DirEntry
-	12, // 5: mountos.filesystem.v1.LstatResponse.info:type_name -> mountos.filesystem.v1.FileInfo
-	1,  // 6: mountos.filesystem.v1.Notice.kind:type_name -> mountos.filesystem.v1.NoticeKind
-	3,  // 7: mountos.filesystem.v1.Notice.change_kind:type_name -> mountos.filesystem.v1.WatchEventKind
-	31, // 8: mountos.filesystem.v1.ReadBatchRequest.ranges:type_name -> mountos.filesystem.v1.Range
-	6,  // 9: mountos.filesystem.v1.ReadBatchResponse.errors:type_name -> mountos.filesystem.v1.BatchItemError
-	10, // 10: mountos.filesystem.v1.ReaddirResponse.entries:type_name -> mountos.filesystem.v1.DirEntry
-	4,  // 11: mountos.filesystem.v1.SeekRequest.whence:type_name -> mountos.filesystem.v1.Whence
-	12, // 12: mountos.filesystem.v1.StatBatchResponse.infos:type_name -> mountos.filesystem.v1.FileInfo
-	6,  // 13: mountos.filesystem.v1.StatBatchResponse.errors:type_name -> mountos.filesystem.v1.BatchItemError
-	12, // 14: mountos.filesystem.v1.StatResponse.info:type_name -> mountos.filesystem.v1.FileInfo
-	31, // 15: mountos.filesystem.v1.WriteBatchRequest.ranges:type_name -> mountos.filesystem.v1.Range
-	6,  // 16: mountos.filesystem.v1.WriteBatchResponse.errors:type_name -> mountos.filesystem.v1.BatchItemError
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	12, // 0: mountos.filesystem.v1.CloneDirRequest.options:type_name -> mountos.filesystem.v1.CloneOptions
+	4,  // 1: mountos.filesystem.v1.CloneOptions.preserve:type_name -> mountos.filesystem.v1.PreserveKind
+	12, // 2: mountos.filesystem.v1.CloneRequest.options:type_name -> mountos.filesystem.v1.CloneOptions
+	0,  // 3: mountos.filesystem.v1.CloneResponse.outcome:type_name -> mountos.filesystem.v1.CloneOutcome
+	1,  // 4: mountos.filesystem.v1.DirEntry.type:type_name -> mountos.filesystem.v1.FileType
+	19, // 5: mountos.filesystem.v1.DirEntry.info:type_name -> mountos.filesystem.v1.FileInfo
+	1,  // 6: mountos.filesystem.v1.FileInfo.type:type_name -> mountos.filesystem.v1.FileType
+	19, // 7: mountos.filesystem.v1.FstatResponse.info:type_name -> mountos.filesystem.v1.FileInfo
+	17, // 8: mountos.filesystem.v1.LsResponse.entries:type_name -> mountos.filesystem.v1.DirEntry
+	19, // 9: mountos.filesystem.v1.LstatResponse.info:type_name -> mountos.filesystem.v1.FileInfo
+	2,  // 10: mountos.filesystem.v1.Notice.kind:type_name -> mountos.filesystem.v1.NoticeKind
+	5,  // 11: mountos.filesystem.v1.Notice.change_kind:type_name -> mountos.filesystem.v1.WatchEventKind
+	39, // 12: mountos.filesystem.v1.ReadBatchRequest.ranges:type_name -> mountos.filesystem.v1.Range
+	8,  // 13: mountos.filesystem.v1.ReadBatchResponse.errors:type_name -> mountos.filesystem.v1.BatchItemError
+	17, // 14: mountos.filesystem.v1.ReaddirResponse.entries:type_name -> mountos.filesystem.v1.DirEntry
+	6,  // 15: mountos.filesystem.v1.SeekRequest.whence:type_name -> mountos.filesystem.v1.Whence
+	19, // 16: mountos.filesystem.v1.StatBatchResponse.infos:type_name -> mountos.filesystem.v1.FileInfo
+	8,  // 17: mountos.filesystem.v1.StatBatchResponse.errors:type_name -> mountos.filesystem.v1.BatchItemError
+	19, // 18: mountos.filesystem.v1.StatResponse.info:type_name -> mountos.filesystem.v1.FileInfo
+	39, // 19: mountos.filesystem.v1.WriteBatchRequest.ranges:type_name -> mountos.filesystem.v1.Range
+	8,  // 20: mountos.filesystem.v1.WriteBatchResponse.errors:type_name -> mountos.filesystem.v1.BatchItemError
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_mountos_fs_proto_init() }
@@ -4388,8 +4984,8 @@ func file_mountos_fs_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_mountos_fs_proto_rawDesc), len(file_mountos_fs_proto_rawDesc)),
-			NumEnums:      5,
-			NumMessages:   71,
+			NumEnums:      7,
+			NumMessages:   79,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

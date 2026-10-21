@@ -57,6 +57,10 @@ ops:
   WarmOpen: {doc: "Starts warming the file in the background and returns a warm id at once. A missing file is reported later as a warm_failed notice on the same connection. Fails at once when the mount has no local cache."}
   WarmRead: {defaults: {offset: 0, length: 0}, doc: "Starts reading a file in the background to warm the cache and returns a warm id at once. Offset 0 and length 0, the defaults, warm the whole file. A length of 0 with an offset warms to the end of the file."}
   Notice: {custom: true}
-  RemoveAll: {doc: "Removes path and everything below it. Returns the removed entry count."}
+  RemoveAll: {doc: "Deprecated: use RemoveDir. Removes path and everything below it. Returns the removed entry count."}
+  Clone: {custom: true}
+  CloneDir: {custom: true}
+  RemoveDir: {custom: true}
+  OpCancel: {custom: true}
   Watch: {custom: true}
   Unwatch: {custom: true}

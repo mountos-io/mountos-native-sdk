@@ -182,6 +182,7 @@ var methodCapability = map[uint16]string{
 	mLs: "ls_stat", mRemoveAll: "remove_all", mWatch: "watch", mUnwatch: "watch",
 	mStatBatch: "bulk_io", mReadBatch: "bulk_io", mWriteBatch: "bulk_io", mReadFile: "bulk_io", mWriteFile: "bulk_io",
 	mWarmOpen: "warm", mWarmRead: "warm",
+	mClone: "clone", mCloneDir: "ops", mRemoveDir: "ops", mOpCancel: "ops",
 }
 
 // need fails a call locally when the server reported capabilities and lacks the

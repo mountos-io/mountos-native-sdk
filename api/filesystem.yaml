@@ -30,7 +30,7 @@
 
 api: mountos.filesystem
 version: 1
-minorVersion: 8
+minorVersion: 9
 
 endpoint:
   # One socket per mount: <home>/.mountOS/sockets/mountos_api_<hash>.sock, where <hash> is the
@@ -50,6 +50,8 @@ capabilities:
   - watch
   - warm
   - pipelining
+  - clone
+  - ops
 
 # Pipelining. A client that sees the capability "pipelining" in the Hello reply
 # may keep up to min(its own limit, max_inflight) requests outstanding on one
@@ -62,8 +64,8 @@ capabilities:
 #     WriteBatch) run one at a time in arrival order. Close and Closedir are
 #     barriers for their handle. A handle can be used only after the reply to
 #     its Open.
-#   - Path operations (Stat, Mkdir, Rename, Ls, StatBatch, Watch, Warm, and so
-#     on) run concurrently with everything and have no order among themselves.
+#   - Path operations (Stat, Mkdir, Rename, Ls, StatBatch, Watch, Warm, Clone,
+#     CloneDir, RemoveDir, OpCancel, and so on) run concurrently with everything and have no order among themselves.
 #     A client that needs an order waits for the reply.
 #   - A notice that a request causes is sent after the reply to that request.
 #   - At the limit the server stops reading frames until a request ends.
@@ -100,6 +102,22 @@ enums:
       CLOSING: 2        # The server is about to close this connection, for example on unmount.
       OVERFLOW: 3       # Notices were dropped because the client read too slowly.
       CHANGE: 4         # A watched path changed. change_kind, path, and old_path say how.
+      OP_DONE: 5        # An operation ended. ref_id is the op id. The count fields carry the totals. Terminal.
+      OP_FAILED: 6      # One entry of an operation failed. ref_id is the op id. path, code, and message say which and why. Not terminal.
+
+  # What Clone and CloneDir copy from the source besides data, mode, and owner.
+  PreserveKind:
+    values:
+      TIMES: 0    # Keep the source times. Without it the new entry gets the current time.
+      XATTR: 1    # Copy extended attributes.
+      ACL: 2      # Copy access control lists.
+
+  # What Clone did with the destination.
+  CloneOutcome:
+    values:
+      CLONED: 0        # The destination did not exist and was created.
+      OVERWRITTEN: 1   # The destination held different content and was replaced.
+      SKIPPED: 2       # The destination already held the same content. Nothing changed.
 
   WatchEventKind:
     values:
@@ -153,8 +171,10 @@ messages:
     message: {id: 3, type: string}
 
   # Asynchronous notice. ref_id is the id the call returned: the warm id for a
-  # warm, the watch id for a watch. path, code, and message are set where they
-  # apply. sequence increases across every notice the server sends.
+  # warm, the watch id for a watch, the op id for an operation. path, code, and
+  # message are set where they apply. sequence increases across every notice the
+  # server sends. The count fields are set only for OP_DONE. A count that is 0 may
+  # be left out.
   Notice:
     kind: {id: 1, type: NoticeKind, required: true}
     sequence: {id: 2, type: uint64, required: true}
@@ -164,6 +184,17 @@ messages:
     message: {id: 6, type: string}
     change_kind: {id: 7, type: WatchEventKind}   # Set for CHANGE.
     old_path: {id: 8, type: string}              # Set for a rename. path is the new name.
+    cloned: {id: 9, type: uint64}                # OP_DONE: entries created.
+    overwritten: {id: 10, type: uint64}          # OP_DONE: entries whose content was replaced.
+    skipped: {id: 11, type: uint64}              # OP_DONE: entries that already held the same content.
+    failed: {id: 12, type: uint64}               # OP_DONE: entries that failed. Can exceed the OP_FAILED notices sent.
+    removed: {id: 13, type: uint64}              # OP_DONE: entries removed.
+    protected: {id: 14, type: uint64}            # OP_DONE: entries kept because the mount protects them.
+
+  # Options of Clone and CloneDir. Servers ignore fields they do not know.
+  CloneOptions:
+    overwrite: {id: 1, type: bool}                  # Replace the content of a destination that differs. Without it such a destination fails with EEXIST.
+    preserve: {id: 2, type: "repeated PreserveKind"}
 
   # Error metadata carried when a frame has the error flag set.
   WireError:
@@ -526,7 +557,7 @@ operations:
     errors: [EISDIR, EACCES, EIO, ENOSPC, EROFS, ENAMETOOLONG, ESTALE, EDQUOT, EBUSY]
     capability: bulk_io
 
-  # Recursive removal. Removes children before the parent. Stops at the first
+  # Deprecated: use RemoveDir. Still served. Recursive removal. Removes children before the parent. Stops at the first
   # error and reports the number of entries removed before it.
   - name: RemoveAll
     id: 55
@@ -537,6 +568,80 @@ operations:
       removed: {id: 1, type: uint64, required: true}
     errors: [ENOENT, EACCES, EROFS, EIO, ENAMETOOLONG, ESTALE, EBUSY]
     capability: remove_all
+
+  # Copy and tree operations. Paths are relative to the mount root, under the
+  # same length cap and rules as the other path operations. A source with a
+  # trailing slash must be a directory, else ENOTDIR. A destination with a
+  # trailing slash names a directory. A destination inside the source fails with
+  # EINVAL. The root names the mount keeps for itself (.mountOS and the like) are
+  # refused as source or destination with EPERM. A clone moves no data.
+  #
+  # Clone copies one entry that is not a directory: a file, a symlink, or a
+  # special file. It runs to the end before it replies.
+  - name: Clone
+    id: 56
+    kind: unary
+    request:
+      from: {id: 1, type: string, required: true}
+      to: {id: 2, type: string, required: true}
+      options: {id: 3, type: CloneOptions}
+    response:
+      outcome: {id: 1, type: CloneOutcome, required: true}
+    errors: [ENOENT, EEXIST, EACCES, EPERM, ENOTDIR, EISDIR, EINVAL, EXDEV, EROFS, EIO, ENOSPC, ENAMETOOLONG, ESTALE, EDQUOT, EBUSY, ELOOP]
+    capability: clone
+
+  # Operations. CloneDir and RemoveDir work on a whole tree. They reply at once
+  # with an op id, then run in the background. An operation is not a job: the
+  # server keeps no record of it after it ends, and there is no status call and
+  # no resume. The outcome arrives as notices on the connection that started it,
+  # all with ref_id equal to the op id. OP_FAILED arrives once per failing entry,
+  # with the path relative to the root of the operation's mount (empty when the
+  # name is not valid UTF-8), the code, and a bounded message. The server sends
+  # at most 64 OP_FAILED notices per operation. OP_DONE ends the operation. It
+  # carries the totals in the count fields, and failed may exceed the OP_FAILED
+  # notices sent. After OP_DONE no more notices come for that op id. A server
+  # holds a bounded number of running operations per connection and per mount.
+  # At the limit the call fails with EAGAIN. The destination of CloneDir is
+  # created first and filled from the top, so a partial tree can be seen and
+  # used while the operation runs. A failed or cancelled CloneDir leaves what it
+  # made. The server aborts the operations of a connection when it closes.
+  # Notices can be lost when the client reads too slowly. An OVERFLOW notice with
+  # ref_id 0 then means the state of every operation on that connection is unknown.
+  - name: CloneDir
+    id: 57
+    kind: unary
+    request:
+      from: {id: 1, type: string, required: true}
+      to: {id: 2, type: string, required: true}
+      options: {id: 3, type: CloneOptions}
+    response:
+      op_id: {id: 1, type: uint64, required: true}
+    errors: [ENOENT, EEXIST, EACCES, EPERM, ENOTDIR, EINVAL, EXDEV, EROFS, EAGAIN, ENAMETOOLONG, ESTALE, EBUSY, ELOOP]
+    capability: ops
+
+  # RemoveDir removes path and everything below it, children first. It does not
+  # stop at the first error: it keeps going and reports each failure.
+  - name: RemoveDir
+    id: 58
+    kind: unary
+    request:
+      path: {id: 1, type: string, required: true}
+    response:
+      op_id: {id: 1, type: uint64, required: true}
+    errors: [ENOENT, EACCES, EPERM, ENOTDIR, EINVAL, EROFS, EAGAIN, ENAMETOOLONG, ESTALE, EBUSY]
+    capability: ops
+
+  # OpCancel asks a running operation to stop. The operation still ends with an
+  # OP_DONE that carries what was done so far. Only the connection that started
+  # the operation can cancel it. An unknown or finished op id fails with ENOENT.
+  - name: OpCancel
+    id: 59
+    kind: unary
+    request:
+      op_id: {id: 1, type: uint64, required: true}
+    response: Empty
+    errors: [ENOENT]
+    capability: ops
 
   # Watch. The call returns a watch id at once. Changes then arrive as Notice
   # frames (kind CHANGE, ref_id equal to the watch id, with change_kind, path, and

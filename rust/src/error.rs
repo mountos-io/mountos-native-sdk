@@ -23,6 +23,9 @@ pub enum Error {
   /// A write that covers more than one frame failed after `written` bytes were stored.
   /// `source` is the failure. `code` and the `io::ErrorKind` come from `source`.
   Partial { written: usize, source: Box<Error> },
+  /// Notices were lost, so the end of an operation cannot be known. The server may still run it.
+  /// Returned by `Operation::wait`.
+  OperationStateUnknown,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -55,6 +58,7 @@ impl Error {
         written: *written,
         source: Box::new(source.dup()),
       },
+      Error::OperationStateUnknown => Error::OperationStateUnknown,
     }
   }
 
@@ -77,6 +81,7 @@ impl fmt::Display for Error {
       Error::TooLarge(m) => write!(f, "request too large: {m}"),
       Error::TooManyEntries(m) => write!(f, "too many entries: {m}"),
       Error::Partial { written, source } => write!(f, "partial write of {written} bytes: {source}"),
+      Error::OperationStateUnknown => write!(f, "operation state unknown, notices were lost"),
     }
   }
 }

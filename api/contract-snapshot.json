@@ -1,15 +1,22 @@
 {
   "version": 1,
-  "minorVersion": 8,
+  "minorVersion": 9,
   "capabilities": [
     "bulk_io",
     "ls_stat",
     "remove_all",
     "watch",
     "warm",
-    "pipelining"
+    "pipelining",
+    "clone",
+    "ops"
   ],
   "enums": {
+    "CloneOutcome": {
+      "CLONED": 0,
+      "OVERWRITTEN": 1,
+      "SKIPPED": 2
+    },
     "FileType": {
       "DIRECTORY": 1,
       "REGULAR": 0,
@@ -18,6 +25,8 @@
     "NoticeKind": {
       "CHANGE": 4,
       "CLOSING": 2,
+      "OP_DONE": 5,
+      "OP_FAILED": 6,
       "OVERFLOW": 3,
       "WARM_DONE": 0,
       "WARM_FAILED": 1
@@ -30,6 +39,11 @@
       "READ_WRITE": 2,
       "TRUNC": 512,
       "WRITE_ONLY": 1
+    },
+    "PreserveKind": {
+      "ACL": 2,
+      "TIMES": 0,
+      "XATTR": 1
     },
     "WatchEventKind": {
       "ATTRIB": 4,
@@ -60,6 +74,16 @@
       "message": {
         "id": 3,
         "type": "string"
+      }
+    },
+    "CloneOptions": {
+      "overwrite": {
+        "id": 1,
+        "type": "bool"
+      },
+      "preserve": {
+        "id": 2,
+        "type": "repeated PreserveKind"
       }
     },
     "DirEntry": {
@@ -175,9 +199,17 @@
         "id": 7,
         "type": "WatchEventKind"
       },
+      "cloned": {
+        "id": 9,
+        "type": "uint64"
+      },
       "code": {
         "id": 5,
         "type": "string"
+      },
+      "failed": {
+        "id": 12,
+        "type": "uint64"
       },
       "kind": {
         "id": 1,
@@ -192,18 +224,34 @@
         "id": 8,
         "type": "string"
       },
+      "overwritten": {
+        "id": 10,
+        "type": "uint64"
+      },
       "path": {
         "id": 4,
         "type": "string"
       },
+      "protected": {
+        "id": 14,
+        "type": "uint64"
+      },
       "ref_id": {
         "id": 3,
+        "type": "uint64"
+      },
+      "removed": {
+        "id": 13,
         "type": "uint64"
       },
       "sequence": {
         "id": 2,
         "type": "uint64",
         "required": true
+      },
+      "skipped": {
+        "id": 11,
+        "type": "uint64"
       }
     },
     "Range": {
@@ -1377,6 +1425,158 @@
         "EBUSY"
       ],
       "capability": "remove_all"
+    },
+    "56": {
+      "name": "Clone",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "from": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          },
+          "options": {
+            "id": 3,
+            "type": "CloneOptions"
+          },
+          "to": {
+            "id": 2,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "outcome": {
+            "id": 1,
+            "type": "CloneOutcome",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "EEXIST",
+        "EACCES",
+        "EPERM",
+        "ENOTDIR",
+        "EISDIR",
+        "EINVAL",
+        "EXDEV",
+        "EROFS",
+        "EIO",
+        "ENOSPC",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EDQUOT",
+        "EBUSY",
+        "ELOOP"
+      ],
+      "capability": "clone"
+    },
+    "57": {
+      "name": "CloneDir",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "from": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          },
+          "options": {
+            "id": 3,
+            "type": "CloneOptions"
+          },
+          "to": {
+            "id": 2,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "op_id": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "EEXIST",
+        "EACCES",
+        "EPERM",
+        "ENOTDIR",
+        "EINVAL",
+        "EXDEV",
+        "EROFS",
+        "EAGAIN",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EBUSY",
+        "ELOOP"
+      ],
+      "capability": "ops"
+    },
+    "58": {
+      "name": "RemoveDir",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "path": {
+            "id": 1,
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "fields": {
+          "op_id": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "errors": [
+        "ENOENT",
+        "EACCES",
+        "EPERM",
+        "ENOTDIR",
+        "EINVAL",
+        "EROFS",
+        "EAGAIN",
+        "ENAMETOOLONG",
+        "ESTALE",
+        "EBUSY"
+      ],
+      "capability": "ops"
+    },
+    "59": {
+      "name": "OpCancel",
+      "kind": "unary",
+      "request": {
+        "fields": {
+          "op_id": {
+            "id": 1,
+            "type": "uint64",
+            "required": true
+          }
+        }
+      },
+      "response": {
+        "ref": "Empty"
+      },
+      "errors": [
+        "ENOENT"
+      ],
+      "capability": "ops"
     },
     "60": {
       "name": "Watch",

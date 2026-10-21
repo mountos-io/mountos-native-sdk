@@ -43,6 +43,10 @@ const (
 	mReadFile   uint16 = 53
 	mWriteFile  uint16 = 54
 	mRemoveAll  uint16 = 55
+	mClone      uint16 = 56
+	mCloneDir   uint16 = 57
+	mRemoveDir  uint16 = 58
+	mOpCancel   uint16 = 59
 	mWatch      uint16 = 60
 	mUnwatch    uint16 = 61
 	mWarmOpen   uint16 = 70
@@ -184,7 +188,7 @@ func (cl *Client) Access(path string, mode uint32) error {
 	return cl.run(mAccess, &wire.AccessRequest{Path: path, Mode: mode}, &wire.Empty{})
 }
 
-// RemoveAll removes path and everything below it. Returns the removed entry count.
+// RemoveAll deprecated: use RemoveDir. Removes path and everything below it. Returns the removed entry count.
 func (cl *Client) RemoveAll(path string) (uint64, error) {
 	var r wire.RemoveAllResponse
 	if err := cl.run(mRemoveAll, &wire.RemoveAllRequest{Path: path}, &r); err != nil {

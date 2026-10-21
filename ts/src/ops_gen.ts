@@ -43,6 +43,10 @@ export const Method = {
   ReadFile: 53,
   WriteFile: 54,
   RemoveAll: 55,
+  Clone: 56,
+  CloneDir: 57,
+  RemoveDir: 58,
+  OpCancel: 59,
   Watch: 60,
   Unwatch: 61,
   WarmOpen: 70,
@@ -139,7 +143,7 @@ export abstract class ClientOps {
     await this.call(Method.Access, enc(pb.AccessRequest, { path, mode }));
   }
 
-  /** Removes path and everything below it. Returns the removed entry count. */
+  /** Deprecated: use RemoveDir. Removes path and everything below it. Returns the removed entry count. */
   async removeAll(path: string): Promise<number> {
     const r = dec(pb.RemoveAllResponse, await this.call(Method.RemoveAll, enc(pb.RemoveAllRequest, { path })));
     return Number(r.removed);

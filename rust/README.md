@@ -26,6 +26,7 @@ Paths are relative to the mount root.
 
 - POSIX file operations: open, read, write, seek, fsync, truncate, stat, mkdir, rmdir, unlink, rename, symlink, readlink, link, chmod, utimens, statfs, access, and directory listing.
 - Calls that cost one round trip for many items: `ls`, `stat_batch`, `read_file`, `write_file`, `remove_all`, and `File::read_batch` and `File::write_batch`.
+- `clone_entry`, `clone_dir`, and `remove_dir`: copy a file, copy a tree, or remove a tree. The tree calls return an `Operation` at once. `Operation::wait(timeout)` gives the counts and up to 64 failures, and `Error::OperationStateUnknown` when notices were lost. `Operation::cancel` stops it. `remove_all` is deprecated, use `remove_dir`.
 - `watch` for change events, and `warm_open` and `warm_read` to fill the mount cache.
 - Wire types in `mountos_native::wire` are `#[non_exhaustive]`, so code outside the crate cannot build them by struct literal. The client methods take plain arguments.
 - Request pipelining on a connection pool, per-call timeouts, and one error code set on every operating system.

@@ -13,6 +13,10 @@ const METHOD_CAPABILITY: Partial<Record<number, string>> = {
   [Method.Watch]: "watch",
   [Method.WarmOpen]: "warm",
   [Method.WarmRead]: "warm",
+  [Method.Clone]: "clone",
+  [Method.CloneDir]: "ops",
+  [Method.RemoveDir]: "ops",
+  [Method.OpCancel]: "ops",
 };
 
 /**

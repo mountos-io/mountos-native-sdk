@@ -3,6 +3,7 @@ use crate::error::{Error, Result};
 use crate::events::{lock, Chan, Event, EventKind, Hub, Logger};
 use crate::file::File;
 use crate::frame::{self, Frame, FLAG_ERROR, FLAG_NOTIFY, FLAG_RESPONSE, MAX_PAYLOAD_BYTES};
+use crate::ops::OpState;
 use crate::wire::*;
 use prost::Message;
 use std::collections::{HashMap, HashSet};
@@ -119,9 +120,23 @@ fn required_capability(m: u16) -> Option<&'static str> {
     method::REMOVE_ALL => Some("remove_all"),
     method::WATCH => Some("watch"),
     method::WARM_OPEN | method::WARM_READ => Some("warm"),
+    method::CLONE => Some("clone"),
+    method::CLONE_DIR | method::REMOVE_DIR | method::OP_CANCEL => Some("ops"),
     _ => None,
   }
 }
+
+/// Capabilities asked for in Hello. The server answers with the ones it offers.
+const CLIENT_CAPABILITIES: [&str; 8] = [
+  "bulk_io",
+  "ls_stat",
+  "remove_all",
+  "watch",
+  "warm",
+  "pipelining",
+  "clone",
+  "ops",
+];
 
 /// Turns a socket write that hit the send timeout into `Error::Timeout`.
 fn write_timeout(e: Error) -> Error {
@@ -140,6 +155,8 @@ struct Waiter {
   method: u16,
   /// Queue that receives the notices of a watch started by this request.
   watch: Option<Arc<Chan>>,
+  /// Record of the operation started by this request.
+  op: Option<Arc<OpState>>,
   out: Mutex<Option<Result<Frame>>>,
   cv: Condvar,
 }
@@ -256,7 +273,7 @@ impl Sock {
       client_name: name.into(),
       min_version: 1,
       max_version: 1,
-      capabilities: vec!["pipelining".into()],
+      capabilities: CLIENT_CAPABILITIES.iter().map(|c| (*c).into()).collect(),
     };
     let (resp, _): (HelloResponse, _) = self.call_msg(method::HELLO, &req, &[])?;
     if resp.version != 1 {
@@ -316,6 +333,7 @@ impl Sock {
       w.set(Err(end.dup()));
     }
     self.hub.conn_lost(self.id);
+    self.hub.ops_lost(self.id, &end);
     let expected = self.closing.load(Ordering::SeqCst) || self.saw_closing.load(Ordering::SeqCst);
     if report && !expected {
       self
@@ -355,7 +373,14 @@ impl Sock {
 
   /// Sends one request and waits for its response frame. The sizes and the capability are
   /// checked before anything is sent, so those failures leave the connection intact.
-  fn call(&self, method: u16, req: &impl Message, payload: &[u8], watch: Option<Arc<Chan>>) -> Result<Frame> {
+  fn call(
+    &self,
+    method: u16,
+    req: &impl Message,
+    payload: &[u8],
+    attach: (Option<Arc<Chan>>, Option<Arc<OpState>>),
+  ) -> Result<Frame> {
+    let (watch, op) = attach;
     if let Some(cap) = required_capability(method) {
       if self
         .info
@@ -374,6 +399,7 @@ impl Sock {
     let w = Arc::new(Waiter {
       method,
       watch,
+      op,
       out: Mutex::new(None),
       cv: Condvar::new(),
     });
@@ -456,12 +482,25 @@ impl Sock {
     req: &impl Message,
     payload: &[u8],
   ) -> Result<(R, Vec<u8>)> {
-    self.decode(self.call(method, req, payload, None)?)
+    self.decode(self.call(method, req, payload, (None, None))?)
   }
 
   /// Starts a watch. The reader routes the notices of the new watch to `chan` before the call returns.
   pub(crate) fn call_watch(&self, req: &WatchRequest, chan: Arc<Chan>) -> Result<WatchResponse> {
-    Ok(self.decode(self.call(method::WATCH, req, &[], Some(chan))?)?.0)
+    Ok(self.decode(self.call(method::WATCH, req, &[], (Some(chan), None))?)?.0)
+  }
+
+  /// Starts an operation. The reader registers it with the hub before the call returns, so no
+  /// notice of the operation can come first. `id_of` reads the op id from the reply.
+  pub(crate) fn call_op<R: Message + Default>(
+    &self,
+    method: u16,
+    req: &impl Message,
+    st: Arc<OpState>,
+    id_of: impl Fn(&R) -> u64,
+  ) -> Result<u64> {
+    let r: R = self.decode(self.call(method, req, &[], (None, Some(st)))?)?.0;
+    Ok(id_of(&r))
   }
 
   fn decode<R: Message + Default>(&self, resp: Frame) -> Result<(R, Vec<u8>)> {
@@ -503,12 +542,31 @@ impl Sock {
             hub.add_watch(r.watch_id, self.id, chan.clone());
           }
         }
+        if ok {
+          self.register_op(hub, &f, &w);
+        }
         w.set(Ok(f));
       }
       None if ok => self.release_late(f),
       None => {}
     }
     Ok(())
+  }
+
+  /// Hands the operation a start reply created to the hub. When the connection ended in the
+  /// meantime, the operation ends at once, because no notice can reach it.
+  fn register_op(&self, hub: &Hub, f: &Frame, w: &Waiter) {
+    let Some(st) = &w.op else { return };
+    let id = match f.method {
+      method::CLONE_DIR => CloneDirResponse::decode(&f.meta[..]).map(|r| r.op_id),
+      method::REMOVE_DIR => RemoveDirResponse::decode(&f.meta[..]).map(|r| r.op_id),
+      _ => return,
+    };
+    let Ok(id) = id else { return };
+    hub.add_op(id, self.id, st.clone());
+    if self.is_dead() {
+      hub.ops_lost(self.id, &aborted("connection lost"));
+    }
   }
 
   /// A reply arrived for a request nobody waits for. An Open, Opendir or Watch created a server
