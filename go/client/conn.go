@@ -33,7 +33,12 @@ var limits = frame.Limits{MaxMetaBytes: maxMetaBytes, MaxPayloadBytes: maxPayloa
 var helloCapabilities = []string{"bulk_io", "ls_stat", "remove_all", "watch", "warm", capPipelining, "clone", "ops"}
 
 // waiter is the reply slot of one request. The reader sends at most one frame.
-type waiter struct{ ch chan frame.Frame }
+// hook, when set, runs on the reader goroutine with the reply before the caller
+// sees it, so later frames of the socket find whatever the hook registered.
+type waiter struct {
+	ch   chan frame.Frame
+	hook func(frame.Frame)
+}
 
 // A waiter goes back to the pool only when it is out of the pending map and
 // its channel is empty.
@@ -70,8 +75,7 @@ type sock struct {
 	pmu        sync.Mutex
 	wmu        sync.Mutex // serializes request writes
 	ready      atomic.Bool
-	closing    atomic.Bool   // set when this side closes the socket on purpose
-	overflows  atomic.Uint64 // connection-level OVERFLOW notices seen
+	closing    atomic.Bool // set when this side closes the socket on purpose
 }
 
 // setErr records why the socket ended. The first reason wins.
@@ -278,6 +282,9 @@ func (s *sock) deliver(f frame.Frame) bool {
 	s.pmu.Unlock()
 	switch {
 	case ok:
+		if w.hook != nil {
+			w.hook(f)
+		}
 		w.ch <- f // capacity 1 and one send per waiter: never blocks
 	case abandoned:
 		s.releaseLate(method, f)
@@ -482,10 +489,16 @@ func (s *sock) await(w *waiter, id uint64, method uint16) (frame.Frame, error) {
 
 // roundTrip sends one request and decodes its reply. It never closes the socket.
 func (s *sock) roundTrip(method uint16, req proto.Message, payload []byte, resp proto.Message, out *[]byte) error {
+	return s.roundTripHook(method, req, payload, resp, out, nil)
+}
+
+// roundTripHook is roundTrip with a hook that sees the reply on the reader goroutine.
+func (s *sock) roundTripHook(method uint16, req proto.Message, payload []byte, resp proto.Message, out *[]byte, hook func(frame.Frame)) error {
 	if s.isDead() {
 		return s.lostErr()
 	}
 	w := waiterPool.Get().(*waiter)
+	w.hook = hook
 	id, err := s.send(w, method, req, payload)
 	if err != nil {
 		waiterPool.Put(w)

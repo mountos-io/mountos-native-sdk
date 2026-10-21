@@ -574,7 +574,8 @@ operations:
   # trailing slash must be a directory, else ENOTDIR. A destination with a
   # trailing slash names a directory. A destination inside the source fails with
   # EINVAL. The root names the mount keeps for itself (.mountOS and the like) are
-  # refused as source or destination with EPERM. A clone moves no data.
+  # refused: as a destination with EEXIST (as create does), as a source or a
+  # removal target with EPERM (as unlink and rename do). A clone moves no data.
   #
   # Clone copies one entry that is not a directory: a file, a symlink, or a
   # special file. It runs to the end before it replies.
@@ -607,6 +608,8 @@ operations:
   # made. The server aborts the operations of a connection when it closes.
   # Notices can be lost when the client reads too slowly. An OVERFLOW notice with
   # ref_id 0 then means the state of every operation on that connection is unknown.
+  # An OVERFLOW notice whose ref_id is an op id means the state of that operation
+  # is unknown. Op ids never equal watch ids or warm ids on one connection.
   - name: CloneDir
     id: 57
     kind: unary

@@ -4,15 +4,14 @@ import (
 	"context"
 	"errors"
 
+	"github.com/mountos-io/mountos-native-sdk/go/frame"
 	"github.com/mountos-io/mountos-native-sdk/go/wire"
+	"google.golang.org/protobuf/proto"
 )
 
 // MaxOpFailures is the most failures an Operation keeps. The server sends at
 // most this many OP_FAILED notices per operation. Counts.Failed can be larger.
 const MaxOpFailures = 64
-
-// opOrphanLimit bounds the notice states that no Operation has claimed yet.
-const opOrphanLimit = 1024
 
 // ErrOperationStateUnknown is returned by Operation.Wait when notices were lost
 // and the end of the operation cannot be known. The server may still run it.
@@ -85,11 +84,8 @@ func (cl *Client) Clone(from, to string, opts *CloneOptions) (wire.CloneOutcome,
 // at once. The server needs the "ops" capability. It fails with EAGAIN when the
 // server runs too many operations. opts may be nil.
 func (cl *Client) CloneDir(from, to string, opts *CloneOptions) (*Operation, error) {
-	return cl.startOp(func(sk *sock) (uint64, error) {
-		var r wire.CloneDirResponse
-		_, err := sk.call(mCloneDir, &wire.CloneDirRequest{From: from, To: to, Options: opts.wire()}, &r, nil)
-		return r.GetOpId(), err
-	})
+	var r wire.CloneDirResponse
+	return cl.startOp(mCloneDir, &wire.CloneDirRequest{From: from, To: to, Options: opts.wire()}, &r, r.GetOpId)
 }
 
 // RemoveDir starts removing path and everything below it in the background and
@@ -97,17 +93,14 @@ func (cl *Client) CloneDir(from, to string, opts *CloneOptions) (*Operation, err
 // reports each failure. The server needs the "ops" capability. It fails with
 // EAGAIN when the server runs too many operations.
 func (cl *Client) RemoveDir(path string) (*Operation, error) {
-	return cl.startOp(func(sk *sock) (uint64, error) {
-		var r wire.RemoveDirResponse
-		_, err := sk.call(mRemoveDir, &wire.RemoveDirRequest{Path: path}, &r, nil)
-		return r.GetOpId(), err
-	})
+	var r wire.RemoveDirResponse
+	return cl.startOp(mRemoveDir, &wire.RemoveDirRequest{Path: path}, &r, r.GetOpId)
 }
 
-// startOp runs start on one pooled connection and registers the operation it
-// returns. A notice for the operation can arrive before start returns, so the
-// hub holds it until register claims the id.
-func (cl *Client) startOp(start func(sk *sock) (uint64, error)) (*Operation, error) {
+// startOp sends a start request on one pooled connection. The reader registers
+// the operation while it hands over the reply, so no notice of the operation
+// can arrive before the registration. idOf reads the op id from resp.
+func (cl *Client) startOp(method uint16, req, resp proto.Message, idOf func() uint64) (*Operation, error) {
 	if cl.isClosed() {
 		return nil, ErrClientClosed
 	}
@@ -116,12 +109,43 @@ func (cl *Client) startOp(start func(sk *sock) (uint64, error)) (*Operation, err
 		return nil, err
 	}
 	defer sk.release()
-	gen := sk.overflows.Load()
-	id, err := start(sk)
+	st, err := sk.callOp(method, req, resp, idOf)
 	if err != nil {
 		return nil, err
 	}
-	return &Operation{cl: cl, sk: sk, id: id, st: cl.hub.opRegister(sk, id, gen)}, nil
+	return &Operation{cl: cl, sk: sk, id: st.key.id, st: st}, nil
+}
+
+// callOp runs a start request. The state is set only on success, and the read
+// loop wrote it before the reply reached this goroutine.
+func (s *sock) callOp(method uint16, req, resp proto.Message, idOf func() uint64) (*opState, error) {
+	if err := s.c.cl.need(method); err != nil {
+		return nil, err
+	}
+	var st *opState
+	hook := func(f frame.Frame) {
+		if f.Flags&frame.FlagResponse == 0 || f.Flags&frame.FlagError != 0 || f.Method != method {
+			return
+		}
+		if proto.Unmarshal(f.Meta, resp) == nil {
+			st = s.c.cl.hub.opRegister(s, idOf())
+		}
+	}
+	err := s.roundTripHook(method, req, nil, resp, nil, hook)
+	if err != nil && !keepsSocket(err) {
+		s.fail(err)
+	}
+	if err == nil && st == nil {
+		return nil, missingResult(opName(method), "op_id")
+	}
+	return st, err
+}
+
+func opName(method uint16) string {
+	if method == mCloneDir {
+		return "CloneDir"
+	}
+	return "RemoveDir"
 }
 
 // Operation is a running or ended CloneDir or RemoveDir. It lives on the
@@ -180,15 +204,14 @@ type opState struct {
 	failures []OpFailure
 	counts   OpCounts
 	finished bool
-	claimed  bool // an Operation holds it
 }
 
-// opNotice records an OP_DONE or OP_FAILED notice.
+// opNotice records an OP_DONE or OP_FAILED notice for a registered operation.
 func (h *hub) opNotice(sk *sock, n *wire.Notice) {
 	h.opmu.Lock()
 	defer h.opmu.Unlock()
-	st := h.opState(opKey{sk, n.GetRefId()})
-	if st == nil || st.finished {
+	st := h.ops[opKey{sk, n.GetRefId()}]
+	if st == nil {
 		return
 	}
 	if n.GetKind() == wire.NoticeKind_NOTICE_KIND_OP_FAILED {
@@ -209,56 +232,25 @@ func countsOf(n *wire.Notice) OpCounts {
 	}
 }
 
-// opState returns the state for key, making an unclaimed one when none exists.
-// It returns nil when too many unclaimed states wait. Caller holds opmu.
-func (h *hub) opState(key opKey) *opState {
-	if st, ok := h.ops[key]; ok {
-		return st
-	}
-	if h.opOrphans >= opOrphanLimit {
-		return nil
-	}
-	st := &opState{key: key, done: make(chan struct{})}
-	h.ops[key] = st
-	h.opOrphans++
-	return st
-}
-
-// opFinish ends st with err. Caller holds opmu.
+// opFinish ends st with err and forgets it. Caller holds opmu.
 func (h *hub) opFinish(st *opState, err error) {
 	if st.finished {
 		return
 	}
 	st.finished, st.err = true, err
 	close(st.done)
-	if st.claimed {
-		delete(h.ops, st.key)
-	}
+	delete(h.ops, st.key)
 }
 
-// opRegister claims the state of operation id on sk. gen is the overflow count
-// of sk before the start call. A larger count at registration means notices were lost
-// while the start call ran, and the operation may have ended unseen.
-func (h *hub) opRegister(sk *sock, id, gen uint64) *opState {
+// opRegister records the operation id on sk. The read loop calls it while it
+// hands over the start reply, so every later notice of the connection finds
+// the state. The loop ends the state when the connection ends.
+func (h *hub) opRegister(sk *sock, id uint64) *opState {
 	h.opmu.Lock()
 	defer h.opmu.Unlock()
 	key := opKey{sk, id}
-	st, ok := h.ops[key]
-	if ok {
-		h.opOrphans--
-	} else {
-		st = &opState{key: key, done: make(chan struct{})}
-		h.ops[key] = st
-	}
-	st.claimed = true
-	switch {
-	case st.finished:
-		delete(h.ops, key)
-	case sk.overflows.Load() != gen:
-		h.opFinish(st, ErrOperationStateUnknown)
-	case sk.isDead():
-		h.opFinish(st, sk.lostErr())
-	}
+	st := &opState{key: key, done: make(chan struct{})}
+	h.ops[key] = st
 	return st
 }
 
@@ -273,9 +265,6 @@ func (h *hub) opResult(st *opState) (OpCounts, []OpFailure, error) {
 // connection. Another reference names one operation. Pending operations end
 // with ErrOperationStateUnknown.
 func (h *hub) opsOverflow(sk *sock, ref uint64) {
-	if ref == 0 {
-		sk.overflows.Add(1)
-	}
 	h.opmu.Lock()
 	defer h.opmu.Unlock()
 	for key, st := range h.ops {
@@ -286,19 +275,13 @@ func (h *hub) opsOverflow(sk *sock, ref uint64) {
 }
 
 // opsLost ends every pending operation of sk with err, because its connection
-// ended, and forgets the states nobody claimed.
+// ended.
 func (h *hub) opsLost(sk *sock, err error) {
 	h.opmu.Lock()
 	defer h.opmu.Unlock()
 	for key, st := range h.ops {
-		if key.sk != sk {
-			continue
+		if key.sk == sk {
+			h.opFinish(st, err)
 		}
-		if !st.claimed {
-			h.opOrphans--
-			delete(h.ops, key)
-			continue
-		}
-		h.opFinish(st, err)
 	}
 }

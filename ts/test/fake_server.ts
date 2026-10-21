@@ -66,7 +66,7 @@ export class FakeServer {
   cancels: bigint[] = [];
   /** Requests received for Clone, CloneDir, RemoveDir and OpCancel. */
   opRequests = 0;
-  /** Notices sent right after each start reply, with ref_id set to the new op id. */
+  /** Notices sent right after each start reply. A notice without a refId gets the new op id. */
   eagerOpNotices: Partial<pb.Notice>[] = [];
   private opsById = new Map<number, { s: net.Socket; ended: boolean }>();
   private nextOp = 1;
@@ -180,8 +180,7 @@ export class FakeServer {
     this.opsById.set(id, { s, ended: false });
     this.ok(s, r, c, { opId: BigInt(id) } as T);
     for (const n of this.eagerOpNotices) {
-      const isOverflow = n.kind === pb.NoticeKind.NOTICE_KIND_OVERFLOW && n.refId === undefined;
-      this.notice(s, isOverflow ? n : { ...n, refId: BigInt(id) }, r.id);
+      this.notice(s, n.refId === undefined ? { ...n, refId: BigInt(id) } : n, r.id);
     }
   }
 

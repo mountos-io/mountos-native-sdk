@@ -110,7 +110,7 @@ These calls work inside one mount. Paths are relative to the mount root, as in t
 | `OpCancel` | 59 | `ops` | Asks a running operation to stop. `Operation.Cancel` calls it. |
 | `RemoveAll` | 55 | `remove_all` | Deprecated: use `RemoveDir`. The server still serves it. It stops at the first error. |
 
-Options for `Clone` and `CloneDir`: `overwrite` replaces a destination that differs (without it the call fails with `EEXIST`). `preserve` lists extra properties to copy: `times`, `xattr`, `acl`. A source with a trailing slash must be a directory. A destination with a trailing slash names a directory. A destination inside its source fails with `EINVAL`. The names the mount keeps for itself at the root, such as `.mountOS`, fail with `EPERM`.
+Options for `Clone` and `CloneDir`: `overwrite` replaces a destination that differs (without it the call fails with `EEXIST`). `preserve` lists extra properties to copy: `times`, `xattr`, `acl`. A source with a trailing slash must be a directory. A destination with a trailing slash names a directory. A destination inside its source fails with `EINVAL`. The names the mount keeps for itself at the root, such as `.mountOS`, fail with `EEXIST` as a destination and with `EPERM` as a source or removal target.
 
 An operation is not a job. The server keeps no record of it after it ends, and there is no status call and no resume. The start call returns an operation id. The result arrives as events on the connection that started it:
 

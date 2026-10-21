@@ -24,11 +24,18 @@ type fakeOps struct {
 	clones   []*wire.CloneRequest
 	dirs     []*wire.CloneDirRequest
 	removes  []string
-	eager    []*wire.Notice
+	eager    []eagerNotice
 	next     uint64
 	seen     int // requests of the four methods received
 	outcome  wire.CloneOutcome
 	full     bool // CloneDir and RemoveDir answer EAGAIN
+}
+
+// eagerNotice is a notice sent right after a start reply. stamp sets its ref_id
+// to the new op id.
+type eagerNotice struct {
+	n     *wire.Notice
+	stamp bool
 }
 
 // handleOps serves the four operation methods. Caller holds s.mu.
@@ -98,9 +105,9 @@ func (s *fakeServer) afterOpStart(idx int, resp proto.Message) {
 	s.mu.Lock()
 	eager := s.ops.eager
 	s.mu.Unlock()
-	for _, n := range eager {
-		n = proto.Clone(n).(*wire.Notice)
-		if n.Kind != wire.NoticeKind_NOTICE_KIND_OVERFLOW || n.RefId != 0 {
+	for _, e := range eager {
+		n := proto.Clone(e.n).(*wire.Notice)
+		if e.stamp {
 			n.RefId = id
 		}
 		s.opNotice(id, n)
@@ -253,9 +260,9 @@ func TestOpNoticesBeforeRegistration(t *testing.T) {
 	s := newFakeServer(t, 0)
 	cl := dial(t, s, 1)
 	s.mu.Lock()
-	s.ops.eager = []*wire.Notice{
-		{Kind: wire.NoticeKind_NOTICE_KIND_OP_FAILED, Path: "p", Code: "EIO", Message: "m"},
-		{Kind: wire.NoticeKind_NOTICE_KIND_OP_DONE, Failed: 1, Cloned: 5},
+	s.ops.eager = []eagerNotice{
+		{&wire.Notice{Kind: wire.NoticeKind_NOTICE_KIND_OP_FAILED, Path: "p", Code: "EIO", Message: "m"}, true},
+		{&wire.Notice{Kind: wire.NoticeKind_NOTICE_KIND_OP_DONE, Failed: 1, Cloned: 5}, true},
 	}
 	s.mu.Unlock()
 	for range 50 {
@@ -270,8 +277,8 @@ func TestOpNoticesBeforeRegistration(t *testing.T) {
 	}
 	cl.hub.opmu.Lock()
 	defer cl.hub.opmu.Unlock()
-	if len(cl.hub.ops) != 0 || cl.hub.opOrphans != 0 {
-		t.Fatalf("hub keeps %d states, %d unclaimed", len(cl.hub.ops), cl.hub.opOrphans)
+	if len(cl.hub.ops) != 0 {
+		t.Fatalf("hub keeps %d states", len(cl.hub.ops))
 	}
 }
 
@@ -327,22 +334,24 @@ func TestOverflowMakesStateUnknown(t *testing.T) {
 			t.Fatalf("b: %+v %v", counts, err)
 		}
 	})
-	t.Run("sent right after the start reply", func(t *testing.T) {
-		s := newFakeServer(t, 0)
-		cl := dial(t, s, 1)
-		s.mu.Lock()
-		s.ops.eager = []*wire.Notice{{Kind: wire.NoticeKind_NOTICE_KIND_OVERFLOW}}
-		s.mu.Unlock()
-		for range 30 {
-			op, err := cl.RemoveDir("tree")
-			if err != nil {
-				t.Fatal(err)
+	for name, stamp := range map[string]bool{"connection level, right after the start reply": false, "naming the operation, right after the start reply": true} {
+		t.Run(name, func(t *testing.T) {
+			s := newFakeServer(t, 0)
+			cl := dial(t, s, 1)
+			s.mu.Lock()
+			s.ops.eager = []eagerNotice{{&wire.Notice{Kind: wire.NoticeKind_NOTICE_KIND_OVERFLOW}, stamp}}
+			s.mu.Unlock()
+			for range 30 {
+				op, err := cl.RemoveDir("tree")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err := op.Wait(waitCtx(t)); !errors.Is(err, ErrOperationStateUnknown) {
+					t.Fatalf("Wait error = %v, want state unknown", err)
+				}
 			}
-			if _, _, err := op.Wait(waitCtx(t)); !errors.Is(err, ErrOperationStateUnknown) {
-				t.Fatalf("Wait error = %v, want state unknown", err)
-			}
-		}
-	})
+		})
+	}
 	t.Run("other connection is not affected", func(t *testing.T) {
 		s := newFakeServer(t, 0)
 		cl := dial(t, s, 2)
@@ -606,28 +615,12 @@ func TestOpNoticesNotLoggedWithoutListener(t *testing.T) {
 	}
 }
 
-func TestOrphanStatesAreBounded(t *testing.T) {
-	h := newHub(&bufLogger{})
-	defer h.shutdown()
-	sk := &sock{dead: make(chan struct{})}
-	for id := uint64(1); id <= opOrphanLimit+50; id++ {
-		h.opNotice(sk, &wire.Notice{Kind: wire.NoticeKind_NOTICE_KIND_OP_FAILED, RefId: id})
-	}
-	if h.opOrphans != opOrphanLimit || len(h.ops) != opOrphanLimit {
-		t.Fatalf("held %d states, %d unclaimed, want %d", len(h.ops), h.opOrphans, opOrphanLimit)
-	}
-	h.opsLost(sk, ErrConnLost)
-	if h.opOrphans != 0 || len(h.ops) != 0 {
-		t.Fatalf("after loss: %d states, %d unclaimed", len(h.ops), h.opOrphans)
-	}
-}
-
 // A duplicate or late OP_DONE does not change a result that is final.
 func TestFinalResultIsStable(t *testing.T) {
 	h := newHub(&bufLogger{})
 	defer h.shutdown()
 	sk := &sock{dead: make(chan struct{})}
-	st := h.opRegister(sk, 1, 0)
+	st := h.opRegister(sk, 1)
 	h.opNotice(sk, &wire.Notice{Kind: wire.NoticeKind_NOTICE_KIND_OP_DONE, RefId: 1, Cloned: 1})
 	h.opNotice(sk, &wire.Notice{Kind: wire.NoticeKind_NOTICE_KIND_OP_DONE, RefId: 1, Cloned: 99})
 	h.opNotice(sk, &wire.Notice{Kind: wire.NoticeKind_NOTICE_KIND_OP_FAILED, RefId: 1, Path: "late"})

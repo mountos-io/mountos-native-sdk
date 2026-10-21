@@ -129,7 +129,7 @@ type hub struct {
 	waiters map[uint64][]chan error
 	warmed  map[uint64]warmResult
 
-	// Guarded by opmu: ops, opOrphans.
+	// Guarded by opmu: ops.
 	ops map[opKey]*opState
 
 	// Guarded by lmu: watches, listeners, nextLID.
@@ -139,17 +139,16 @@ type hub struct {
 	// Guarded by qmu: q, dropped, stopped.
 	q []Event
 
-	order     []uint64 // warm ids in cache, oldest first
-	instance  uint64   // server instance of the last Hello. 0 when that server reports none.
-	dropped   int
-	nextLID   uint64
-	opOrphans int // states in ops that no Operation has claimed
-	opmu      sync.Mutex
-	qmu       sync.Mutex
-	lmu       sync.Mutex
-	wmu       sync.Mutex
-	inCall    atomic.Bool // a listener is running, possibly the caller of shutdown
-	stopped   bool
+	order    []uint64 // warm ids in cache, oldest first
+	instance uint64   // server instance of the last Hello. 0 when that server reports none.
+	dropped  int
+	nextLID  uint64
+	opmu     sync.Mutex
+	qmu      sync.Mutex
+	lmu      sync.Mutex
+	wmu      sync.Mutex
+	inCall   atomic.Bool // a listener is running, possibly the caller of shutdown
+	stopped  bool
 	// instanceKnown is true once a Hello has been seen, so a first connect
 	// differs from a reconnect to a server that reports no id.
 	instanceKnown bool

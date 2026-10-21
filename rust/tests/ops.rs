@@ -477,14 +477,16 @@ fn an_overflow_that_names_one_operation_spares_the_others() {
 
 #[test]
 fn an_overflow_right_behind_the_start_reply_is_not_lost() {
-  let srv = start();
-  let c = client(&srv, 1);
-  let mut n = Notice::default();
-  n.kind = NoticeKind::Overflow as i32;
-  *srv.shared.eager.lock().unwrap() = vec![(n, false)];
-  for _ in 0..20 {
-    let op = c.remove_dir("tree").unwrap();
-    assert!(is_unknown(&op.wait(t())));
+  for stamp in [false, true] {
+    let srv = start();
+    let c = client(&srv, 1);
+    let mut n = Notice::default();
+    n.kind = NoticeKind::Overflow as i32;
+    *srv.shared.eager.lock().unwrap() = vec![(n, stamp)];
+    for _ in 0..20 {
+      let op = c.remove_dir("tree").unwrap();
+      assert!(is_unknown(&op.wait(t())), "stamp {stamp}");
+    }
   }
 }
 

@@ -151,13 +151,18 @@ describe("clone and operations", () => {
       assert.equal((await b.wait()).counts.removed, 1n);
     });
 
-    it("an overflow right after the start reply is not lost", async () => {
-      srv.eagerOpNotices = [{ kind: NK.NOTICE_KIND_OVERFLOW, refId: 0n }];
-      for (let i = 0; i < 20; i++) {
-        const op = await client.removeDir("tree");
-        await assert.rejects(op.wait(), OperationStateUnknownError);
-      }
-    });
+    for (const [name, eager] of [
+      ["connection level", { kind: NK.NOTICE_KIND_OVERFLOW, refId: 0n }],
+      ["naming the operation", { kind: NK.NOTICE_KIND_OVERFLOW }],
+    ] as const) {
+      it(`an overflow ${name} right after the start reply is not lost`, async () => {
+        srv.eagerOpNotices = [eager];
+        for (let i = 0; i < 30; i++) {
+          const op = await client.removeDir("tree");
+          await assert.rejects(op.wait(), OperationStateUnknownError);
+        }
+      });
+    }
 
     it("does not touch an operation on another connection", async () => {
       const ops = [];
