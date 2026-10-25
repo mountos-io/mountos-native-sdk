@@ -1,6 +1,6 @@
 {
   "name": "@mountos-io/native-sdk",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Node.js client for the mountOS native filesystem API. Talk to a mounted mountOS volume (a POSIX filesystem over S3, Azure Blob or Google Cloud Storage) over a local Unix socket, without FUSE.",
   "keywords": [
     "mountos",
